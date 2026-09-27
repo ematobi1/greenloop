@@ -1,9 +1,10 @@
 """GreenLoop shared contracts: the one schema package every service imports."""
 
-from greenloop_contracts.agent import Agent, AgentStatus
+from greenloop_contracts.agent import Agent, AgentDomain, AgentStatus
 from greenloop_contracts.audit_record import AuditOutcome, AuditRecord
 from greenloop_contracts.base import ContractModel
-from greenloop_contracts.dispatch import Dispatch
+from greenloop_contracts.dispatch import MAX_TIMEOUT_MS, Dispatch
+from greenloop_contracts.error_detail import ErrorDetail
 from greenloop_contracts.error_report import (
     CorrectionAction,
     ErrorCategory,
@@ -11,10 +12,13 @@ from greenloop_contracts.error_report import (
     ErrorSeverity,
 )
 from greenloop_contracts.event import Event
-from greenloop_contracts.execution_result import ExecutionResult, ExecutionStatus
+from greenloop_contracts.execution_result import DENIAL_CODES, ExecutionResult, ExecutionStatus
 from greenloop_contracts.memory_record import (
+    MemoryCategory,
+    MemoryConfidence,
     MemoryOperation,
     MemoryRecord,
+    MemoryScope,
     MemorySource,
     Provenance,
 )
@@ -26,11 +30,15 @@ from greenloop_contracts.registry import (
     parse,
 )
 from greenloop_contracts.task import Task, TaskStatus
+from greenloop_contracts.tool_grant import ToolGrant
 from greenloop_contracts.tool_permission import ToolConsequence, ToolPermission
 
 __all__ = [
     "CONTRACTS",
+    "DENIAL_CODES",
+    "MAX_TIMEOUT_MS",
     "Agent",
+    "AgentDomain",
     "AgentStatus",
     "AuditOutcome",
     "AuditRecord",
@@ -38,18 +46,23 @@ __all__ = [
     "CorrectionAction",
     "Dispatch",
     "ErrorCategory",
+    "ErrorDetail",
     "ErrorReport",
     "ErrorSeverity",
     "Event",
     "ExecutionResult",
     "ExecutionStatus",
+    "MemoryCategory",
+    "MemoryConfidence",
     "MemoryOperation",
     "MemoryRecord",
+    "MemoryScope",
     "MemorySource",
     "Provenance",
     "Task",
     "TaskStatus",
     "ToolConsequence",
+    "ToolGrant",
     "ToolPermission",
     "UnknownContractError",
     "get_contract",
