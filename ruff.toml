@@ -1,0 +1,12 @@
+target-version = "py312"
+line-length = 100
+extend-exclude = ["apps/web", "infra"]
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "S", "SIM", "RUF"]
+
+[lint.isort]
+known-first-party = ["greenloop_contracts", "app"]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101"]
