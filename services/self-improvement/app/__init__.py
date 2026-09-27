@@ -1,1 +1,1 @@
-"""Self-improvement pipeline: proposals, validation and evidence. Execution is disabled by default."""
+"""Self-improvement pipeline: proposals, validation, evidence. Execution is off by default."""

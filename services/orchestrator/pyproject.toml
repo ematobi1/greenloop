@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+# Installs dependencies only. The `app` package runs from this folder (uvicorn and
+# pytest both put it on the path), so each service can keep its own `app/`.
+[project]
+name = "greenloop-orchestrator"
+version = "0.1.0"
+description = "GreenLoop orchestrator: the canonical coordinator."
+requires-python = ">=3.12"
+dependencies = [
+    "greenloop-contracts",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.4",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
+    "httpx>=0.27",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[tool.setuptools]
+packages = []
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "--import-mode=importlib"
