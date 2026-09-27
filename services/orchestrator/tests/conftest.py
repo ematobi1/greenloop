@@ -33,7 +33,8 @@ def make_record() -> Callable[..., MemoryRecord]:
         return MemoryRecord(
             record_id=record_id,
             principal_id=principal_id,
-            scope="personal",
+            scope="private",
+            category="user_context",
             content=content,
             provenance={
                 "source": source,

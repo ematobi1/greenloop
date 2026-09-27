@@ -8,7 +8,7 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the folder map and request flow, and 
 
 | Path | Role |
 |---|---|
-| `packages/contracts` | Shared Pydantic contracts (Agent, Task, Dispatch, ToolPermission, MemoryRecord, Event, ExecutionResult, ErrorReport, AuditRecord) |
+| `packages/contracts` | Shared Pydantic contracts (Agent, Task, Dispatch, ToolPermission, ToolGrant, MemoryRecord, Event, ExecutionResult, ErrorReport, AuditRecord) |
 | `services/orchestrator` | FastAPI orchestrator: auth, reasoning, planning, memory, agents, permissions, audit |
 | `services/broker` | Policy, approval binding and audit ledger in front of MCP tool servers |
 | `services/self-improvement` | Proposal and validation pipeline (execution disabled by default) |

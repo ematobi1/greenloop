@@ -110,7 +110,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 | `.claude/agents/` | Subagent definitions (prompt-engineer) | Tooling | 1 |
 | `.github/workflows/` | CI: Ruff and pytest for Python, lint and typecheck for web | Platform | 1 |
 | `docs/adr/` | Architecture decision records | Architecture | 1 |
-| `packages/contracts/` | Pydantic v2 models: Agent, Task, Dispatch, ToolPermission, MemoryRecord, Event, ExecutionResult, ErrorReport, AuditRecord, plus the registry | Contracts | 1 |
+| `packages/contracts/` | Pydantic v2 models: Agent, Task, Dispatch, ToolPermission, ToolGrant, MemoryRecord, Event, ExecutionResult, ErrorReport, AuditRecord, the shared ErrorDetail, plus the registry | Contracts | 1 |
 | `services/orchestrator/` | FastAPI orchestrator: auth, reasoning, planning, memory, agents, permissions, audit | Orchestrator | 1, 2 |
 | `services/broker/` | Policy, approval binding and ledger gate in front of MCP | Broker | 3 |
 | `services/self-improvement/` | Proposal, validation, isolation and evidence pipeline; execution disabled | Self-improvement | 7 |

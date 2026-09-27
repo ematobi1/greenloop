@@ -14,13 +14,16 @@
 | Correct | A memory operation that records a fix to an earlier record without erasing the original. |
 | Deny by default | When no policy rule matches a request, the answer is deny. |
 | Dispatch | Sending a task to an agent. The `Dispatch` contract. |
-| Error report | A structured record of a failure and its handling. The `ErrorReport` contract. |
+| Error detail | The user-safe error shape `{code, message, fields}` shared by results, error reports and API errors. Never carries internal detail. |
+| Error report | A structured record of a failure and its handling. Its `details` hold internal information that is never returned to users. The `ErrorReport` contract. |
 | Eval | A measured check of model behavior (prompt quality, injection resistance). Lives in the top-level `evals/`. |
 | Event | A timestamped occurrence published inside GreenLoop. The `Event` contract. |
 | Execution result | The outcome of a task or tool call. The `ExecutionResult` contract. |
 | Ledger | The broker's append-only record of every forwarded call and its approval. |
 | MCP | Model Context Protocol. The protocol GreenLoop's tool servers speak. Configured in `mcp/servers.yaml`. |
-| Memory record | One stored memory item with scope, principal and provenance. The `MemoryRecord` contract. |
+| Memory category | What kind of knowledge a memory record holds (for example user_context, decision, verified_outcome), so preferences are not mistaken for facts. |
+| Memory confidence | Whether a memory record is unverified, verified or corrected. New records start unverified. |
+| Memory record | One stored memory item with scope (private or shared), principal, category, confidence and provenance. The `MemoryRecord` contract. |
 | Orchestrator | `services/orchestrator`. The one canonical coordinator of reasoning, memory, agents and tools. |
 | Policy | Rules that decide whether a tool permission is allowed, denied or needs approval. |
 | Principal | The authenticated identity a request acts for. Memory and permissions are scoped to it server-side. |
@@ -28,10 +31,11 @@
 | Proposal | A self-improvement change suggestion, with evidence. Execution is disabled by default. |
 | Provenance | Where a memory record came from and how it changed: source, history, supersede and correct links. |
 | Provider | An external service behind a GreenLoop interface, such as a model API or ElevenLabs. |
-| Scope | The boundary a memory record or permission belongs to, such as a principal or project. |
+| Scope | Who may read a memory record: `private` (only its principal) or `shared`. An enum, so a `project` scope can be added later. |
 | Self-correction | Detecting a failed step and retrying, re-planning or escalating. `correction/lifecycle.py`. |
 | Self-improvement | The pipeline that proposes and validates changes to GreenLoop itself. `services/self-improvement`. |
 | SpeechProvider | The voice interface in `speech/provider.py`. ElevenLabs is one implementation. |
 | Supersede | A memory operation that replaces a record with a newer one while keeping the old one in history. |
 | Task | A unit of planned work. The `Task` contract. |
+| Tool grant | A standing permission the owner gives an agent to use listed actions of a tool, optionally until an expiry. Never a credential. The `ToolGrant` contract. |
 | Tool permission | A request to use a specific tool operation, evaluated by policy. The `ToolPermission` contract. |

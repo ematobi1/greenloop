@@ -22,11 +22,14 @@ class AuditOutcome(StrEnum):
 
 
 class AuditRecord(ContractModel):
+    schema_version = "2"
+
     audit_id: Identifier
     principal_id: Identifier
     actor: Identifier
     action: Identifier
-    resource: str = Field(min_length=1, max_length=500)
+    resource_type: Identifier
+    resource_id: str | None = Field(default=None, min_length=1, max_length=500)
     outcome: AuditOutcome
     correlation_id: Identifier
     operation_hash: Sha256Hex | None = None
