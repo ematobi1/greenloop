@@ -149,6 +149,8 @@ This document maps every folder to its role, owning component and roadmap phase.
 | `CLAUDE.md` | Standing rules for Claude Code | 1 |
 | `docker-compose.yml` | Local db (pgvector/pgvector:pg16), orchestrator, broker, web, github-mcp (profile `tools`) | 1 |
 | `.env.example` | Environment variable names, no values | 1 |
+| `.dockerignore` | Keeps `.env`, keys and local state out of image build contexts | 1 |
+| `ruff.toml` | Shared Ruff lint and format config for all Python packages | 1 |
 
 ## Testing layout
 

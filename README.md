@@ -29,15 +29,21 @@ See [ARCHITECTURE.md](ARCHITECTURE.md) for the folder map and request flow, and 
 ## Quick start
 
 ```powershell
-Copy-Item .env.example .env        # then fill in values locally; never commit .env
+Copy-Item .env.example .env        # then fill in values locally; never commit .env (POSTGRES_PASSWORD is required)
 py -3.12 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-.\scripts\test.ps1                 # run all tests
-docker compose up -d db            # Postgres + pgvector
+.\.venv\Scripts\python.exe -m pip install -e "packages/contracts[dev]" -e "services/orchestrator[dev]" -e "services/broker[dev]" -e "services/self-improvement[dev]"
+npm --prefix apps/web ci
+.\scripts\test.ps1                 # run every suite
+.\scripts\lint.ps1                 # run every linter
+.\scripts\dev.ps1 -Service db      # Postgres + pgvector in Docker
 .\scripts\dev.ps1                  # start the orchestrator
 ```
 
 Then open http://localhost:8000/health (expects `{"status":"ok"}`) and http://localhost:8000/docs.
+
+If ports 5432, 8000, 8100 or 3000 are taken, set `GREENLOOP_DB_PORT`, `GREENLOOP_ORCHESTRATOR_PORT`, `GREENLOOP_BROKER_PORT` or `GREENLOOP_WEB_PORT` in `.env` before `docker compose up`.
+
+Each service keeps its own `app/` package and runs from its own folder, so run pytest and uvicorn from `services/<name>` (the scripts do this for you).
 
 ## Rules
 
