@@ -1,0 +1,52 @@
+# MCP servers GreenLoop may reach. The broker is the only caller: it refuses
+# servers that are disabled and tools outside a server's allowed_toolsets.
+# Credentials are referenced by environment variable name only.
+version: 1
+servers:
+  github:
+    enabled: true
+    description: Official GitHub MCP server (github/github-mcp-server).
+    transport: stdio
+    image: ghcr.io/github/github-mcp-server
+    auth:
+      kind: github_app
+      env: [GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY_PATH]
+    allowed_toolsets: [context, repos, issues, pull_requests]
+    read_only: false
+    phase: 3
+
+  filesystem:
+    enabled: false
+    description: Scoped file access inside an allowlisted workspace directory.
+    transport: stdio
+    auth: {kind: none, env: []}
+    allowed_toolsets: [read]
+    read_only: true
+    phase: 3
+
+  fetch:
+    enabled: false
+    description: Fetch public web pages as text for research.
+    transport: stdio
+    auth: {kind: none, env: []}
+    allowed_toolsets: [fetch]
+    read_only: true
+    phase: 3
+
+  postgres-readonly:
+    enabled: false
+    description: Read-only SQL against a replica through a SELECT-only role.
+    transport: stdio
+    auth: {kind: env, env: [MCP_POSTGRES_READONLY_URL]}
+    allowed_toolsets: [query]
+    read_only: true
+    phase: 3
+
+  google-workspace:
+    enabled: false
+    description: Calendar, Drive and Gmail through OAuth with per-scope approval.
+    transport: stdio
+    auth: {kind: oauth, env: []}
+    allowed_toolsets: [calendar_read, drive_read]
+    read_only: true
+    phase: 3

@@ -1,0 +1,9 @@
+# Baseline policy. Anything no rule matches is denied by the engine itself.
+# Strictest matching effect wins: deny > require_approval > allow.
+rules:
+  - id: default-deny-spend
+    tool: "*"
+    operation: "*"
+    consequences: [spend]
+    effect: deny
+    reason: Spending is not enabled for any tool.

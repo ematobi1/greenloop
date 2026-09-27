@@ -1,0 +1,29 @@
+# GitHub via the official GitHub MCP server. Reads are allowed; anything that
+# changes a repository needs a human approval bound to the exact operation.
+rules:
+  - id: github-read
+    tool: github
+    operation: "*"
+    consequences: [read]
+    effect: allow
+    reason: Read-only GitHub calls.
+
+  - id: github-write-approval
+    tool: github
+    operation: "*"
+    consequences: [write, send]
+    effect: require_approval
+    reason: Repository changes need an approval.
+
+  - id: github-delete-deny
+    tool: github
+    operation: "*"
+    consequences: [delete]
+    effect: deny
+    reason: Deleting GitHub resources is not allowed.
+
+  - id: github-merge-deny
+    tool: github
+    operation: merge_pull_request
+    effect: deny
+    reason: Merges are done by a human in GitHub, never by GreenLoop.
