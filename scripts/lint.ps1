@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
 Runs every linter: Ruff (check + format), PowerShell syntax, web lint and
-typecheck, terraform fmt. Exits 1 if any check fails.
+typecheck, terraform fmt and validate (same steps as CI). Exits 1 if any check fails.
 #>
 $ErrorActionPreference = 'Continue'
 $root = Split-Path -Parent $PSScriptRoot
@@ -38,8 +38,13 @@ try {
 
     if (Get-Command terraform -ErrorAction SilentlyContinue) {
         Invoke-Check 'terraform fmt' { terraform fmt -check -recursive infra/terraform }
+        foreach ($environment in 'dev', 'prod') {
+            $chdir = "-chdir=infra/terraform/envs/$environment"
+            Invoke-Check "terraform init ($environment)" { terraform $chdir init -backend=false -input=false -no-color | Out-Null }
+            Invoke-Check "terraform validate ($environment)" { terraform $chdir validate -no-color }
+        }
     } else {
-        Write-Host '== terraform fmt: skipped (terraform not installed)'
+        Write-Host '== terraform: skipped (terraform not installed)'
     }
 } finally {
     Pop-Location
