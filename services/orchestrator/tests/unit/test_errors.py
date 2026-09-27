@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 
 from app.core.config import Settings
 from app.main import create_app
+from greenloop_contracts import ErrorDetail
 
 
 def _v1_routes() -> list[tuple[str, str]]:
@@ -52,3 +53,17 @@ def test_unhandled_error_hides_internal_detail(settings):
         "error": {"code": "INTERNAL_ERROR", "message": "Internal server error."}
     }
     assert "secret internal detail" not in response.text
+
+
+def test_api_error_bodies_are_contract_error_details(settings):
+    app = create_app(settings)
+
+    @app.get("/boom")
+    async def boom() -> None:
+        raise RuntimeError("internal")
+
+    client = TestClient(app, raise_server_exceptions=False)
+    for path, status in (("/v1/plans/x-1", 501), ("/v1/nope", 404), ("/boom", 500)):
+        response = client.get(path)
+        assert response.status_code == status
+        ErrorDetail.model_validate(response.json()["error"])

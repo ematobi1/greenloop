@@ -1,6 +1,7 @@
 """ErrorReport: a structured failure record and the correction chosen for it.
 
-The message is safe to show a user. Internal detail belongs in `details`,
+`code`, `message` and `fields` are the user-safe part and have exactly the
+ErrorDetail shape (see `detail()`). Internal detail belongs in `details`,
 which is never returned over the public API.
 """
 
@@ -8,7 +9,15 @@ from enum import StrEnum
 
 from pydantic import Field, JsonValue
 
-from greenloop_contracts.base import ContractModel, Identifier, ShortText, Timestamp
+from greenloop_contracts.base import (
+    AgentIdentifier,
+    ContractModel,
+    ErrorCode,
+    Identifier,
+    SafeMessage,
+    Timestamp,
+)
+from greenloop_contracts.error_detail import ErrorDetail
 
 
 class ErrorCategory(StrEnum):
@@ -36,13 +45,21 @@ class CorrectionAction(StrEnum):
 
 
 class ErrorReport(ContractModel):
+    schema_version = "2"
+
     error_id: Identifier
     correlation_id: Identifier
     task_id: Identifier | None = None
+    agent_id: AgentIdentifier | None = None
+    code: ErrorCode
+    message: SafeMessage
+    fields: dict[str, SafeMessage] = Field(default_factory=dict)
     category: ErrorCategory
     severity: ErrorSeverity
-    message: ShortText
     details: dict[str, JsonValue] = Field(default_factory=dict)
     correction_action: CorrectionAction = CorrectionAction.NONE
     attempt: int = Field(default=1, ge=1)
     occurred_at: Timestamp
+
+    def detail(self) -> ErrorDetail:
+        return ErrorDetail(code=self.code, message=self.message, fields=self.fields)

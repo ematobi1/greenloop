@@ -15,6 +15,7 @@ EXPECTED = {
     "Task",
     "Dispatch",
     "ToolPermission",
+    "ToolGrant",
     "MemoryRecord",
     "Event",
     "ExecutionResult",
@@ -23,7 +24,7 @@ EXPECTED = {
 }
 
 
-def test_registry_holds_exactly_the_nine_contracts():
+def test_registry_holds_exactly_the_ten_contracts():
     assert set(CONTRACTS) == EXPECTED
 
 
@@ -53,7 +54,7 @@ def test_parse_raises_on_invalid_payload(payloads):
 def test_json_schemas_cover_every_contract_with_version():
     schemas = json_schemas()
     assert set(schemas) == EXPECTED
-    for entry in schemas.values():
-        assert entry["version"] == "1"
+    for name, entry in schemas.items():
+        assert entry["version"] == CONTRACTS[name].schema_version
         assert entry["schema"]["type"] == "object"
         assert entry["schema"]["additionalProperties"] is False
