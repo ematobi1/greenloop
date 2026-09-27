@@ -1,0 +1,18 @@
+# Never send secrets or local state into an image build context.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+
+.git
+.venv
+**/__pycache__
+**/*.egg-info
+**/.pytest_cache
+**/.ruff_cache
+**/node_modules
+**/.next
+infra/**/.terraform
+SCAFFOLD_PROMPT.md

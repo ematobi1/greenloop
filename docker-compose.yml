@@ -1,0 +1,87 @@
+# Local development stack. Ports bind to 127.0.0.1 only; override host ports with
+# GREENLOOP_DB_PORT, GREENLOOP_ORCHESTRATOR_PORT, GREENLOOP_BROKER_PORT, GREENLOOP_WEB_PORT.
+# Values come from a local .env (gitignored); see .env.example for the names.
+#
+#   docker compose up -d db                 # Postgres + pgvector only
+#   docker compose up -d                    # db, orchestrator, broker, web
+#   docker compose --profile tools up -d    # also the GitHub MCP server
+
+x-app-env: &app-env
+  env_file:
+    - path: .env
+      required: false
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-greenloop}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-greenloop}
+    ports:
+      - "127.0.0.1:${GREENLOOP_DB_PORT:-5432}:5432"
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  orchestrator:
+    <<: *app-env
+    build:
+      context: .
+      dockerfile: services/orchestrator/Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-greenloop}:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-greenloop}
+      BROKER_URL: http://broker:8100
+    ports:
+      - "127.0.0.1:${GREENLOOP_ORCHESTRATOR_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      broker:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  broker:
+    <<: *app-env
+    build:
+      context: .
+      dockerfile: services/broker/Dockerfile
+    ports:
+      - "127.0.0.1:${GREENLOOP_BROKER_PORT:-8100}:8100"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+
+  web:
+    build:
+      context: apps/web
+    environment:
+      ORCHESTRATOR_URL: http://orchestrator:8000
+    ports:
+      - "127.0.0.1:${GREENLOOP_WEB_PORT:-3000}:3000"
+    depends_on:
+      - orchestrator
+
+  # Official GitHub MCP server. Only the broker talks to it. Read-only until the
+  # phase 3 approval flow lands; the broker will then supply a short-lived GitHub
+  # App installation token. No key file is mounted into this container.
+  github-mcp:
+    image: ghcr.io/github/github-mcp-server
+    profiles: ["tools"]
+    stdin_open: true
+    environment:
+      GITHUB_TOOLSETS: context,repos,issues,pull_requests
+      GITHUB_READ_ONLY: "1"
+
+volumes:
+  db-data:
