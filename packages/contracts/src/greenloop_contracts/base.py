@@ -19,8 +19,9 @@ Identifier = Annotated[
 AgentIdentifier = Annotated[str, StringConstraints(pattern=r"^[a-z0-9][a-z0-9-]{0,99}$")]
 """Agent id: 1-100 chars of lowercase letters, digits and hyphens."""
 
-ErrorCode = Annotated[str, StringConstraints(pattern=r"^[A-Z_]+$", max_length=64)]
-"""Machine-readable error code in UPPER_SNAKE_CASE, shared with the API error envelope."""
+ErrorCode = Annotated[str, StringConstraints(pattern=r"^[A-Z][A-Z0-9_]*$", max_length=64)]
+"""Machine-readable error code in UPPER_SNAKE_CASE (digits allowed after the first letter,
+e.g. HTTP_429), shared with the API error envelope."""
 
 Sha256Hex = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{64}$")]
 """Lowercase hex SHA256 digest."""

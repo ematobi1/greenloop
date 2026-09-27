@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta, timezone
 
 import jsonschema
 import pytest
@@ -7,6 +7,22 @@ from pydantic import ValidationError
 from greenloop_contracts import CONTRACTS, Agent, Task, json_schemas
 
 NAMES = sorted(CONTRACTS)
+
+
+def _is_datetime(schema: dict) -> bool:
+    options = schema.get("anyOf", [schema])
+    return any(option.get("format") == "date-time" for option in options)
+
+
+def _timestamp_fields() -> dict[str, set[str]]:
+    return {
+        name: {
+            field
+            for field, schema in model.model_json_schema()["properties"].items()
+            if _is_datetime(schema)
+        }
+        for name, model in CONTRACTS.items()
+    }
 
 
 @pytest.mark.parametrize("name", NAMES)
@@ -89,6 +105,37 @@ class TestTimestamps:
         dumped = task.model_dump(mode="json")
         assert dumped["created_at"] == "2026-09-27T12:00:00Z"
         assert dumped["updated_at"] == "2026-09-27T12:00:00.250000Z"
+
+    def test_every_timestamp_field_is_known(self):
+        assert _timestamp_fields() == {
+            "Agent": {"created_at", "updated_at"},
+            "AuditRecord": {"occurred_at"},
+            "Dispatch": {"dispatched_at"},
+            "ErrorReport": {"occurred_at"},
+            "Event": {"occurred_at"},
+            "ExecutionResult": {"started_at", "finished_at"},
+            "MemoryRecord": {"created_at", "expires_at"},
+            "Task": {"created_at", "updated_at"},
+            "ToolGrant": {"granted_at", "expires_at"},
+            "ToolPermission": set(),
+        }
+
+    @pytest.mark.parametrize("name", NAMES)
+    def test_every_timestamp_field_normalizes_plus_two_hours_to_z(self, name, payloads):
+        fields = _timestamp_fields()[name]
+        shifted = dict(payloads[name])
+        for field in fields:
+            instant = (
+                datetime.fromisoformat("2026-10-01T00:00:00+00:00")
+                if field == "expires_at"
+                else None
+            )
+            original = instant or datetime.fromisoformat(shifted[field])
+            shifted[field] = original.astimezone(timezone(timedelta(hours=2))).isoformat()
+            assert shifted[field].endswith("+02:00")
+        dumped = CONTRACTS[name].model_validate(shifted).model_dump(mode="json")
+        for field in fields:
+            assert dumped[field].endswith("Z"), f"{name}.{field} = {dumped[field]}"
 
     def test_default_timestamps_are_utc(self, payloads):
         payload = {
