@@ -7,7 +7,7 @@ Every record passes through four steps, in this order:
 1. Filter: drop tombstones and any record not owned by the requesting principal.
 2. Sanitize: NFKC-normalize (so look-alike brackets become real ones and get
    escaped), then strip control and invisible format characters.
-3. Redact: replace known secret shapes with [REDACTED].
+3. Redact: app.core.redaction.Redactor replaces known secrets and credential shapes.
 4. Bound and escape: truncate each record, escape &, < and >, and stop adding
    records once the total budget is reached.
 
@@ -17,33 +17,20 @@ reference data, never instructions.
 
 import html
 import logging
-import re
 import unicodedata
 from collections.abc import Iterable
 from dataclasses import dataclass
 
+from app.core.redaction import REDACTED, Redactor
 from greenloop_contracts import MemoryOperation, MemoryRecord
 
 logger = logging.getLogger(__name__)
 
-REDACTED = "[REDACTED]"
+__all__ = ["REDACTED", "TRUNCATED_MARKER", "ContextLimits", "MemoryContext", "build_memory_context"]
+
 TRUNCATED_MARKER = " [truncated]"
 BLOCK_TAG = "retrieved_memory"
 RECORD_TAG = "memory_record"
-
-_SECRET_PATTERNS: tuple[re.Pattern[str], ...] = (
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*?-----END [A-Z ]*PRIVATE KEY-----", re.DOTALL),
-    re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----.*", re.DOTALL),
-    re.compile(r"sk-ant-[A-Za-z0-9_\-]{10,}"),
-    re.compile(r"\bsk-[A-Za-z0-9_\-]{20,}"),
-    re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,}"),
-    re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,}"),
-    re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
-    re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,}"),
-    re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}"),
-    re.compile(r"(?i)\bbearer\s+[A-Za-z0-9._~+/\-]{16,}=*"),
-)
-_ASSIGNED_SECRET = re.compile(r"(?i)\b(api[_-]?key|secret|password|passwd|token)(\s*[:=]\s*)(\S+)")
 
 
 @dataclass(frozen=True)
@@ -76,15 +63,6 @@ def sanitize(text: str) -> str:
     )
 
 
-def redact(text: str) -> tuple[str, int]:
-    count = 0
-    for pattern in _SECRET_PATTERNS:
-        text, hits = pattern.subn(REDACTED, text)
-        count += hits
-    text, hits = _ASSIGNED_SECRET.subn(lambda m: f"{m.group(1)}{m.group(2)}{REDACTED}", text)
-    return text, count + hits
-
-
 def _render_record(record: MemoryRecord, content: str) -> str:
     attributes = " ".join(
         f'{name}="{html.escape(value, quote=True)}"'
@@ -106,8 +84,10 @@ def build_memory_context(
     *,
     principal_id: str,
     limits: ContextLimits | None = None,
+    redactor: Redactor | None = None,
 ) -> MemoryContext:
     limits = limits or ContextLimits()
+    redactor = redactor or Redactor()
     footer = f"</{BLOCK_TAG}>"
     budget = limits.max_total_chars - len(_header(10**6, 10**6)) - len(footer)
 
@@ -127,7 +107,7 @@ def build_memory_context(
             omitted += 1
             continue
 
-        content, hits = redact(sanitize(record.content))
+        content, hits = redactor.redact_counted(sanitize(record.content))
         redactions += hits
         if len(content) > limits.max_record_chars:
             content = content[: limits.max_record_chars] + TRUNCATED_MARKER

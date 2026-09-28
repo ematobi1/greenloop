@@ -3,7 +3,15 @@ from pydantic import ValidationError
 
 from app.core.config import Settings
 
-ENV_VARS = ("DATABASE_URL", "ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "BROKER_URL", "LOG_LEVEL")
+ENV_VARS = (
+    "DATABASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ELEVENLABS_API_KEY",
+    "BROKER_URL",
+    "LOG_LEVEL",
+    "ALLOWED_HOSTS",
+    "CORS_ORIGINS",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -48,3 +56,35 @@ def test_rejects_invalid_log_level(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "LOUD")
     with pytest.raises(ValidationError):
         Settings(_env_file=None)
+
+
+def test_list_settings_load_from_json_environment_values(monkeypatch):
+    monkeypatch.setenv("ALLOWED_HOSTS", '["127.0.0.1", "localhost", "orchestrator"]')
+    monkeypatch.setenv("CORS_ORIGINS", '["http://localhost:53000"]')
+    settings = Settings(_env_file=None)
+    assert settings.allowed_hosts == ["127.0.0.1", "localhost", "orchestrator"]
+    assert settings.cors_origins == ["http://localhost:53000"]
+
+
+@pytest.mark.parametrize("name", ["ALLOWED_HOSTS", "DATABASE_URL", "ANTHROPIC_API_KEY"])
+def test_empty_environment_values_fall_back_to_defaults(monkeypatch, name):
+    monkeypatch.setenv(name, "")
+    settings = Settings(_env_file=None)
+    assert settings.allowed_hosts == ["127.0.0.1", "localhost"]
+    assert settings.database_url is None
+    assert settings.anthropic_api_key is None
+
+
+def test_secret_values_include_every_secret_and_the_database_password(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "synthetic-anthropic-key")
+    monkeypatch.setenv("ELEVENLABS_API_KEY", "synthetic-elevenlabs-key")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://greenloop:db-pass-123@db/greenloop")
+    values = Settings(_env_file=None).secret_values()
+    assert "synthetic-anthropic-key" in values
+    assert "synthetic-elevenlabs-key" in values
+    assert "db-pass-123" in values
+    assert "postgresql+psycopg://greenloop:db-pass-123@db/greenloop" in values
+
+
+def test_secret_values_empty_when_nothing_is_configured():
+    assert Settings(_env_file=None).secret_values() == []

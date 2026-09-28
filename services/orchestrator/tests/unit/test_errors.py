@@ -4,8 +4,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
+from app.core.errors import ApiError, ErrorEnvelope
 from app.main import create_app
-from greenloop_contracts import ErrorDetail
 
 
 def _v1_routes() -> list[tuple[str, str]]:
@@ -18,14 +18,17 @@ def _v1_routes() -> list[tuple[str, str]]:
     ]
 
 
+BUILT_ROUTES = {("GET", "/v1/health"), ("GET", "/v1/audit-records")}
 V1_ROUTES = _v1_routes()
+UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
 
 
 def test_every_v1_route_is_covered():
-    assert len(V1_ROUTES) == 14
+    assert len(V1_ROUTES) == 15
+    assert set(V1_ROUTES) >= BUILT_ROUTES
 
 
-@pytest.mark.parametrize(("method", "path"), V1_ROUTES)
+@pytest.mark.parametrize(("method", "path"), UNBUILT_ROUTES)
 def test_unbuilt_routes_return_501_error_shape(client, method, path):
     response = client.request(method, path)
     assert response.status_code == 501
@@ -66,4 +69,70 @@ def test_api_error_bodies_are_contract_error_details(settings):
     for path, status in (("/v1/plans/x-1", 501), ("/v1/nope", 404), ("/boom", 500)):
         response = client.get(path)
         assert response.status_code == status
-        ErrorDetail.model_validate(response.json()["error"])
+        ErrorEnvelope.model_validate(response.json())
+
+
+def test_method_not_allowed_has_its_own_code(client):
+    response = client.put("/health")
+    assert response.status_code == 405
+    assert response.json()["error"] == {
+        "code": "METHOD_NOT_ALLOWED",
+        "message": "Method not allowed.",
+    }
+
+
+def test_api_error_carries_fields_and_headers(settings):
+    app = create_app(settings)
+
+    @app.get("/needs-auth")
+    async def needs_auth() -> None:
+        raise ApiError(
+            401,
+            "UNAUTHENTICATED",
+            "Missing or invalid token.",
+            fields={"authorization": "Bearer token required"},
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    response = TestClient(app).get("/needs-auth")
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+    assert response.json()["error"]["fields"] == {"authorization": "Bearer token required"}
+
+
+def test_empty_fields_are_omitted(client):
+    assert "fields" not in client.get("/v1/nope").json()["error"]
+
+
+def test_validation_errors_name_fields_without_the_location_prefix(settings):
+    app = create_app(settings)
+
+    @app.get("/items")
+    async def items(limit: int) -> dict:
+        return {"limit": limit}
+
+    response = TestClient(app).get("/items", params={"limit": "many"})
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "VALIDATION_FAILED"
+    assert set(error["fields"]) == {"limit"}
+
+
+def test_overlong_messages_are_truncated_not_crashing(settings):
+    app = create_app(settings)
+
+    @app.get("/long")
+    async def long() -> None:
+        raise ApiError(400, "BAD_REQUEST", "x" * 2000, fields={"f": "y" * 2000})
+
+    error = TestClient(app).get("/long").json()["error"]
+    assert len(error["message"]) == 500
+    assert len(error["fields"]["f"]) == 500
+
+
+def test_openapi_documents_the_error_envelope(settings):
+    schema = create_app(settings).openapi()
+    responses = schema["paths"]["/v1/plans/{plan_id}"]["get"]["responses"]
+    assert responses["501"]["content"]["application/json"]["schema"]["$ref"].endswith(
+        "/ErrorEnvelope"
+    )

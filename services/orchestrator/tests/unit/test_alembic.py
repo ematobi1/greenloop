@@ -10,10 +10,10 @@ from app.db.session import DatabaseNotConfiguredError, database_url
 SERVICE_ROOT = Path(__file__).resolve().parents[2]
 
 
-def test_alembic_script_directory_resolves_with_no_revisions_yet():
+def test_alembic_has_a_single_linear_head():
     config = Config(str(SERVICE_ROOT / "alembic.ini"))
     config.set_main_option("script_location", str(SERVICE_ROOT / "app" / "db" / "migrations"))
-    assert ScriptDirectory.from_config(config).get_heads() == []
+    assert ScriptDirectory.from_config(config).get_heads() == ["0001"]
 
 
 def test_database_url_requires_configuration():
