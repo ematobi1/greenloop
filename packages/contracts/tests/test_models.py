@@ -332,11 +332,39 @@ class TestErrorReport:
         assert report.fields == {"agent_id": "no such agent"}
 
     @pytest.mark.parametrize(
-        "code", ["lowercase", "Mixed_Case", "HAS-DASH", "HAS SPACE", "", "X" * 65]
+        "code",
+        [
+            "lowercase",
+            "Mixed_Case",
+            "HAS-DASH",
+            "HAS SPACE",
+            "",
+            "_",
+            "_LEADING_UNDERSCORE",
+            "429_FIRST_DIGIT",
+            "X" * 65,
+        ],
     )
     def test_rejects_codes_not_matching_the_shared_uppercase_pattern(self, payloads, code):
         with pytest.raises(ValidationError):
             ErrorReport.model_validate({**payloads["ErrorReport"], "code": code})
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            "HTTP_429",
+            "X",
+            "TOOL_UNAVAILABLE",
+            "TRAILING_",
+            "NOT_IMPLEMENTED",
+            "NOT_FOUND",
+            "HTTP_ERROR",
+            "VALIDATION_FAILED",
+            "INTERNAL_ERROR",
+        ],
+    )
+    def test_accepts_uppercase_codes_with_digits_after_the_first_letter(self, payloads, code):
+        assert ErrorReport.model_validate({**payloads["ErrorReport"], "code": code}).code == code
 
     def test_code_is_required(self, payloads):
         payload = {k: v for k, v in payloads["ErrorReport"].items() if k != "code"}

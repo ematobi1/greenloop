@@ -105,6 +105,19 @@ def test_rejects_finish_before_start(payloads):
         )
 
 
+def test_start_and_finish_normalize_offsets_to_utc_z(payloads):
+    normalized = result(
+        payloads,
+        status="succeeded",
+        output=OUTPUT,
+        started_at="2026-09-27T14:00:00+02:00",
+        finished_at="2026-09-27T14:00:05+02:00",
+    )
+    dumped = normalized.model_dump(mode="json")
+    assert dumped["started_at"] == "2026-09-27T12:00:00Z"
+    assert dumped["finished_at"] == "2026-09-27T12:00:05Z"
+
+
 def test_agent_id_is_optional_for_broker_initiated_calls(payloads):
     assert result(payloads, status="succeeded", output=OUTPUT, agent_id=None).agent_id is None
 

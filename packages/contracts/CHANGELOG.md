@@ -23,7 +23,7 @@ Ports the domain schemas from the old `greenloop-contracts` repository (JSON Sch
 | MemoryRecord | new required `category` (9 values); new `confidence` (unverified, verified, corrected; defaults to unverified); `scope` is now the enum private or shared; new optional `related_task_id`, `expires_at` (must be after `created_at`) | yes |
 | Event | new optional `task_id`, `agent_id` | no |
 | ExecutionResult | `status` adds `partial`; `output` is now optional and `error` embeds an `ErrorDetail`; new optional `agent_id`; output and error follow the status (succeeded: output required, no error; failed: error required, no output; denied: error required with a code in `DENIAL_CODES`, no output; partial and cancelled: neither required). A failed result no longer requires `error_report_id`; the link is optional | yes |
-| ErrorReport | new required `code` (UPPER_SNAKE_CASE, same pattern as the API error envelope); new `fields`, optional `agent_id`; `message` limit is now 500; `detail()` returns the user-safe `ErrorDetail` | yes |
+| ErrorReport | new required `code` (`^[A-Z][A-Z0-9_]*$`, max 64: starts with a letter, digits allowed after it such as `HTTP_429`; same pattern as the API error envelope); new `fields`, optional `agent_id`; `message` limit is now 500; `detail()` returns the user-safe `ErrorDetail` | yes |
 | AuditRecord | `resource` is replaced by required `resource_type` and optional `resource_id` | yes |
 
 ToolPermission is unchanged (schema v1).
