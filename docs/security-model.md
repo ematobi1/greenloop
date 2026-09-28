@@ -21,7 +21,7 @@ Every request acts for exactly one principal. Memory, approvals and audit record
 
 - Append-only with provenance. Supersede, correct and delete append a new record; nothing is edited in place.
 - A delete is a tombstone with empty content, so deleted personal data is not copied into new rows. Physical purge on request is a phase 2 task (GDPR/CCPA).
-- Retrieved memory is untrusted. It can hold prompt injection, markup that tries to close the memory block, or secrets a user pasted. The context builder normalizes (NFKC), strips control and invisible characters, redacts known secret shapes, truncates, and escapes `&`, `<` and `>`. The system prompt frames the block as reference data and tells the model to report embedded instructions.
+- Retrieved memory is untrusted. It can hold prompt injection, markup that tries to close the memory block, or secrets a user pasted. The context builder normalizes (NFKC), strips control and invisible characters, redacts secrets with the shared `Redactor` (`app/core/redaction.py`), truncates, and escapes `&`, `<` and `>`. The system prompt frames the block as reference data and tells the model to report embedded instructions.
 
 ## Consequential actions
 
@@ -62,7 +62,8 @@ Proposed-code execution is locked twice: `SELF_IMPROVEMENT_EXECUTION_ENABLED` de
 | Model calls a tool it should not | Deny-by-default policy in orchestrator and broker | `tests/security/test_policy.py`, `services/broker/tests/test_policy.py` |
 | Approval replay or reuse for a different operation | SHA256 binding, single use, principal check | `services/broker/tests/test_approval_binding.py` |
 | Tampering with the audit trail | Hash-chained ledger | `services/broker/tests/test_ledger.py` |
-| Secret leakage via logs, errors or prompts | `SecretStr`, generic 500, redaction in context builder | `tests/unit/test_config.py`, `tests/unit/test_errors.py` |
+| Secret leakage via logs, errors, streams or prompts | `SecretStr`; one `Redactor` seeded with every configured secret value, applied to memory context, model output streams and every log line (including stack traces); generic 500 | `tests/unit/test_redaction.py`, `tests/unit/test_logging.py`, `tests/unit/test_errors.py` |
+| DNS rebinding against the local API | Host header allowlist, 400 before any route runs | `tests/unit/test_middleware.py` |
 | Secrets baked into images | `.dockerignore`; images run as non-root | Stage F image inspection |
 | Cross-principal memory access | Server-side principal filter plus context builder check | `test_context_builder.py::TestFiltering` |
 | Self-improvement runs unreviewed code | Flag off by default and a second hard lock | `services/self-improvement/tests/test_execution_disabled.py` |

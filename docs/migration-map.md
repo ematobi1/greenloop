@@ -7,7 +7,7 @@ Update the status as each row moves: `not started`, `in progress`, `ported`, `no
 | Old folder | New path | Notes | Status |
 |---|---|---|---|
 | greenloop-contracts | `packages/contracts` | 9 domain schemas + ToolGrant ported in 0.2.0; 6 API-response schemas and the old `services/` deferred to the orchestrator port (see below) | ported |
-| greenloop-canonical-orchestrator | `services/orchestrator` | AI engine, memory, agents, dispatch, auth, audit, approvals | not started |
+| greenloop-canonical-orchestrator | `services/orchestrator` | Ported in 5 PRs (see the orchestrator detail below). Not ported: Claude CLI provider and its sandbox, Windows ACL module, vendored wheels, broker CLI adapter routes | in progress |
 | greenloop-orchestrator-broker | `services/broker` (approval binding, ledger) and `services/orchestrator/app/tools/broker_client.py` | | not started |
 | greenloop-k3-adapter | `services/broker` (approval binding, ledger) and `services/orchestrator/app/tools/broker_client.py` | | not started |
 | greenloop-k1-broker | `services/broker` | Port the operation allowlist and ledger ideas only. The REST client, Windows service and pipes are replaced by the GitHub MCP server and containers. | not started |
@@ -39,6 +39,18 @@ Ported from branch `feature/unified-contracts` at `0eabefb`. Changes are recorde
 | `services/memory-store` | `services/orchestrator/app/memory` | deferred to orchestrator port |
 | `services/agent-registry` | `services/orchestrator/app/agents` | deferred to orchestrator port |
 | `services/backend`, `services/frontend` | compare with greenloop-canonical-orchestrator before deciding | deferred to orchestrator port |
+
+## greenloop-canonical-orchestrator detail
+
+Source: branch `feature/canonical-orchestrator` at `69628c9`. Decisions are recorded in the port plan (approvals owned by the broker, Anthropic API provider, fresh Postgres data, `denied` renamed `rejected`, private execution memory, self-correction deferred to phase 4).
+
+| PR | Scope | Status |
+|---|---|---|
+| 1 | Core platform: single Redactor, structured logging, errors, request id, Host allowlist, CORS | ported |
+| 2 | Postgres baseline, token auth to principals, audit records, `/v1/health` readiness | not started |
+| 3 | Append-only memory store on Postgres | not started |
+| 4 | Conversations, streaming AI engine, providers, prompts | not started |
+| 5 | Agents, dispatch, execution memory, approvals API | not started |
 
 ## Porting rules
 
