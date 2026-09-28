@@ -18,14 +18,17 @@ def _v1_routes() -> list[tuple[str, str]]:
     ]
 
 
+BUILT_ROUTES = {("GET", "/v1/health"), ("GET", "/v1/audit-records")}
 V1_ROUTES = _v1_routes()
+UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
 
 
 def test_every_v1_route_is_covered():
-    assert len(V1_ROUTES) == 14
+    assert len(V1_ROUTES) == 15
+    assert set(V1_ROUTES) >= BUILT_ROUTES
 
 
-@pytest.mark.parametrize(("method", "path"), V1_ROUTES)
+@pytest.mark.parametrize(("method", "path"), UNBUILT_ROUTES)
 def test_unbuilt_routes_return_501_error_shape(client, method, path):
     response = client.request(method, path)
     assert response.status_code == 501

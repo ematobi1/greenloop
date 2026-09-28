@@ -10,9 +10,10 @@ from app.core.errors import ErrorEnvelope, register_error_handlers
 from app.core.logging import configure_logging
 from app.core.middleware import install_request_middleware
 from app.core.redaction import Redactor
+from app.db.session import make_engine, make_session_factory
 
 ERROR_RESPONSES = {
-    status: {"model": ErrorEnvelope} for status in (400, 401, 403, 404, 422, 500, 501)
+    status: {"model": ErrorEnvelope} for status in (400, 401, 403, 404, 422, 500, 501, 503)
 }
 
 
@@ -23,6 +24,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="GreenLoop Orchestrator", version=settings.version)
     app.state.settings = settings
     app.state.redactor = redactor
+    app.state.session_factory = (
+        make_session_factory(make_engine(settings)) if settings.database_url else None
+    )
     register_error_handlers(app)
     install_request_middleware(app, settings.allowed_hosts)
     app.add_middleware(
