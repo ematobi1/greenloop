@@ -11,7 +11,7 @@ from greenloop_contracts import MemoryRecord
 
 @pytest.fixture
 def settings() -> Settings:
-    return Settings(_env_file=None, environment="test")
+    return Settings(_env_file=None, environment="test", allowed_hosts=["testserver"])
 
 
 @pytest.fixture
