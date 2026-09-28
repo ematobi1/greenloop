@@ -47,7 +47,7 @@ Source: branch `feature/canonical-orchestrator` at `69628c9`. Decisions are reco
 | PR | Scope | Status |
 |---|---|---|
 | 1 | Core platform: single Redactor, structured logging, errors, request id, Host allowlist, CORS | ported |
-| 2 | Postgres baseline, token auth to principals, audit records, `/v1/health` readiness | not started |
+| 2 | Postgres baseline, token auth to principals, audit records, `/v1/health` readiness | ported |
 | 3 | Append-only memory store on Postgres | not started |
 | 4 | Conversations, streaming AI engine, providers, prompts | not started |
 | 5 | Agents, dispatch, execution memory, approvals API | not started |
