@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.db.models import AuditRecordRow, PrincipalRole
+from app.db.models import AuditRecordRow, PrincipalRole, PrincipalRow
 from greenloop_contracts import MemoryRecord
 
 URL = "/v1/memory-records"
@@ -320,3 +320,27 @@ def test_every_version_and_the_tombstone_of_a_deleted_chain_are_404(
         assert client.get(f"{URL}/{record_id}/history", headers=auth).status_code == 404
         revision = _revise(client, auth, record_id, operation="supersede", content="back")
         assert revision.status_code == 404
+
+
+def test_role_is_read_from_the_principals_table_on_every_request(
+    client, auth, create, session_factory
+):
+    """The token is opaque; only the principals row decides the role, per request."""
+    v1 = create("claim")
+
+    def set_role(role: str) -> None:
+        with session_factory() as session:
+            session.get(PrincipalRow, "user-1").role = role
+            session.commit()
+
+    def verify(record_id: str):
+        return _revise(
+            client, auth, record_id, operation="supersede", content="c", confidence="verified"
+        )
+
+    assert verify(v1["record_id"]).status_code == 403
+    set_role("system")
+    promoted = verify(v1["record_id"])
+    assert promoted.status_code == 201
+    set_role("user")
+    assert verify(promoted.json()["record_id"]).status_code == 403

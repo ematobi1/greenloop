@@ -109,3 +109,34 @@ def test_downgrade_removes_everything_and_upgrade_restores_it(engine):
     assert set(inspect(engine).get_table_names()) <= {"alembic_version"}
     alembic_command(engine, "upgrade", "head")
     assert {"principals", "api_tokens", "audit_records"} <= set(inspect(engine).get_table_names())
+
+
+def test_0003_backfills_existing_principals_as_user_and_constrains_role(engine):
+    alembic_command(engine, "downgrade", "0002")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO principals (principal_id, display_name)"
+                    " VALUES ('pre-0003', 'Existing')"
+                )
+            )
+        alembic_command(engine, "upgrade", "0003")
+        with engine.connect() as connection:
+            role = connection.scalar(
+                text("SELECT role FROM principals WHERE principal_id = 'pre-0003'")
+            )
+        assert role == "user"
+        column = next(c for c in inspect(engine).get_columns("principals") if c["name"] == "role")
+        assert column["nullable"] is False
+        for bad_role, error in (("admin", "ck_principals_role"), (None, "not-null")):
+            with engine.begin() as connection, pytest.raises(IntegrityError, match=error):
+                connection.execute(
+                    text(
+                        "INSERT INTO principals (principal_id, display_name, role)"
+                        " VALUES (:id, 'Bad', :role)"
+                    ),
+                    {"id": f"bad-{uuid.uuid4().hex[:8]}", "role": bad_role},
+                )
+    finally:
+        alembic_command(engine, "upgrade", "head")
