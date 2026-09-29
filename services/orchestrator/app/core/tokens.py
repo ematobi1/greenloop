@@ -14,7 +14,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.audit import recorder
-from app.db.models import ApiTokenRow, PrincipalRow
+from app.db.models import ApiTokenRow, PrincipalRole, PrincipalRow
 from greenloop_contracts import AuditOutcome, AuditRecord
 
 TOKEN_PREFIX = "glt_"  # noqa: S105 - public marker, not a secret
@@ -49,11 +49,18 @@ def find_active_principal(session: Session, token: str) -> PrincipalRow | None:
     ).one_or_none()
 
 
-def create_principal(session: Session, principal_id: str, display_name: str) -> PrincipalRow:
-    principal = PrincipalRow(principal_id=principal_id, display_name=display_name)
+def create_principal(
+    session: Session,
+    principal_id: str,
+    display_name: str,
+    role: PrincipalRole = PrincipalRole.USER,
+) -> PrincipalRow:
+    principal = PrincipalRow(principal_id=principal_id, display_name=display_name, role=role)
     session.add(principal)
     session.flush()
-    _audit(session, principal_id, "principal.create", "principal", principal_id)
+    _audit(
+        session, principal_id, "principal.create", "principal", principal_id, {"role": role.value}
+    )
     return principal
 
 

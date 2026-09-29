@@ -1,6 +1,7 @@
 """Admin CLI for principals and tokens. Run from services/orchestrator:
 
     python -m app.cli create-principal terry "Terry"
+    python -m app.cli create-principal verifier "Verifier" --role system
     python -m app.cli issue-token terry --label laptop
     python -m app.cli revoke-token tok-...
 
@@ -17,6 +18,7 @@ from sqlalchemy.orm import Session
 
 from app.core import tokens
 from app.core.config import get_settings
+from app.db.models import PrincipalRole
 from app.db.session import make_engine, make_session_factory
 from greenloop_contracts.base import Identifier
 
@@ -48,6 +50,9 @@ def _parser() -> argparse.ArgumentParser:
     create = commands.add_parser("create-principal")
     create.add_argument("principal_id", type=_identifier_arg)
     create.add_argument("display_name", type=_text_arg(200))
+    create.add_argument(
+        "--role", type=PrincipalRole, choices=list(PrincipalRole), default=PrincipalRole.USER
+    )
     issue = commands.add_parser("issue-token")
     issue.add_argument("principal_id", type=_identifier_arg)
     issue.add_argument("--label", type=_text_arg(100), default="default")
@@ -61,8 +66,8 @@ def run(argv: Sequence[str], session_factory: Callable[[], Session]) -> int:
     with session_factory() as session:
         try:
             if args.command == "create-principal":
-                tokens.create_principal(session, args.principal_id, args.display_name)
-                message = f"Created principal {args.principal_id}."
+                tokens.create_principal(session, args.principal_id, args.display_name, args.role)
+                message = f"Created {args.role.value} principal {args.principal_id}."
             elif args.command == "issue-token":
                 token_id, token = tokens.issue_token(session, args.principal_id, args.label)
                 message = f"Token id: {token_id}\nToken (shown once): {token}"
