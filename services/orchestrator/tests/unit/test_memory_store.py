@@ -6,7 +6,12 @@ from sqlalchemy import select
 from app.db.models import AuditRecordRow, MemoryRecordRow
 from app.memory import provenance
 from app.memory.context_builder import build_memory_context
-from app.memory.store import MemoryConflictError, MemoryNotFoundError, MemoryStore
+from app.memory.store import (
+    MemoryConflictError,
+    MemoryNotFoundError,
+    MemorySharingUnavailableError,
+    MemoryStore,
+)
 from greenloop_contracts import MemoryCategory, MemoryConfidence, MemoryScope
 
 
@@ -59,11 +64,11 @@ def test_another_principals_record_looks_missing(store, create):
         store.delete("user-1", record.record_id, "user-1")
 
 
-def test_shared_scope_is_still_owner_only(store, create):
-    record = create(principal_id="user-2", scope=MemoryScope.SHARED)
-    with pytest.raises(MemoryNotFoundError):
-        store.get("user-1", record.record_id)
-    assert store.list_current("user-1", limit=10, offset=0) == ([], 0)
+def test_shared_scope_is_refused_until_a_sharing_policy_exists(store, create, session):
+    with pytest.raises(MemorySharingUnavailableError):
+        create(scope=MemoryScope.SHARED)
+    assert session.scalars(select(MemoryRecordRow)).all() == []
+    assert session.scalars(select(AuditRecordRow)).all() == []
 
 
 def test_revise_appends_and_leaves_the_original_untouched(store, create):
@@ -109,12 +114,13 @@ def test_list_returns_only_live_heads_newest_first(store, create):
 
 def test_list_filters_and_paginates(store, create):
     create("alpha decision", category=MemoryCategory.DECISION)
-    create("beta decision", category=MemoryCategory.DECISION, scope=MemoryScope.SHARED)
+    create("beta decision", category=MemoryCategory.DECISION)
     create("gamma", confidence=MemoryConfidence.VERIFIED)
     assert (
         store.list_current("user-1", limit=10, offset=0, category=MemoryCategory.DECISION)[1] == 2
     )
-    assert store.list_current("user-1", limit=10, offset=0, scope=MemoryScope.SHARED)[1] == 1
+    assert store.list_current("user-1", limit=10, offset=0, scope=MemoryScope.PRIVATE)[1] == 3
+    assert store.list_current("user-1", limit=10, offset=0, scope=MemoryScope.SHARED)[1] == 0
     verified = store.list_current(
         "user-1", limit=10, offset=0, confidence=MemoryConfidence.VERIFIED
     )

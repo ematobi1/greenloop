@@ -76,11 +76,20 @@ class TimestampMixin:
     )
 
 
+class PrincipalRole(StrEnum):
+    """`system` principals are trusted services. Only they may mark memory verified."""
+
+    USER = "user"
+    SYSTEM = "system"
+
+
 class PrincipalRow(TimestampMixin, Base):
     __tablename__ = "principals"
+    __table_args__ = (CheckConstraint(_in("role", PrincipalRole), name="ck_principals_role"),)
 
     principal_id: Mapped[str] = mapped_column(String(128), primary_key=True)
     display_name: Mapped[str] = mapped_column(String(200))
+    role: Mapped[str] = mapped_column(String(16), server_default=PrincipalRole.USER.value)
     disabled_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 
