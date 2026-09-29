@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import pytest
 from pydantic import ValidationError
 
-from app.core.config import Settings
+from app.core.config import Settings, env_file_path, get_settings
 
 ENV_VARS = (
     "DATABASE_URL",
@@ -11,6 +13,7 @@ ENV_VARS = (
     "LOG_LEVEL",
     "ALLOWED_HOSTS",
     "CORS_ORIGINS",
+    "GREENLOOP_ENV_FILE",
 )
 
 
@@ -88,3 +91,83 @@ def test_secret_values_include_every_secret_and_the_database_password(monkeypatc
 
 def test_secret_values_empty_when_nothing_is_configured():
     assert Settings(_env_file=None).secret_values() == []
+
+
+SERVICE_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = SERVICE_ROOT.parents[1]
+SYNTHETIC_URL = "postgresql+psycopg://synthetic:synthetic-pass@127.0.0.1:55432/greenloop"
+
+
+@pytest.fixture
+def fake_repo(tmp_path):
+    """A repo-shaped tree with a root .env and the package file where config.py lives."""
+    package_file = tmp_path / "services" / "orchestrator" / "app" / "core" / "config.py"
+    package_file.parent.mkdir(parents=True)
+    package_file.touch()
+    (tmp_path / ".env").write_text(f"DATABASE_URL={SYNTHETIC_URL}\nLOG_LEVEL=DEBUG\n")
+    return tmp_path, package_file
+
+
+@pytest.fixture
+def fresh_settings():
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+def test_default_env_file_is_the_repo_root_env_from_the_service_folder(monkeypatch):
+    monkeypatch.chdir(SERVICE_ROOT)
+    assert env_file_path() == REPO_ROOT / ".env"
+    assert (REPO_ROOT / "docker-compose.yml").is_file()
+
+
+def test_root_env_is_found_from_the_service_folder(fake_repo, monkeypatch):
+    root, package_file = fake_repo
+    monkeypatch.chdir(package_file.parents[2])
+    path = env_file_path(package_file)
+    assert path == root / ".env"
+    settings = Settings(_env_file=path)
+    assert settings.database_url.get_secret_value() == SYNTHETIC_URL
+    assert settings.log_level == "DEBUG"
+
+
+def test_real_environment_variables_override_the_env_file(fake_repo, monkeypatch):
+    _, package_file = fake_repo
+    monkeypatch.setenv("LOG_LEVEL", "WARNING")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://env:env-pass@db/greenloop")
+    settings = Settings(_env_file=env_file_path(package_file))
+    assert settings.log_level == "WARNING"
+    assert settings.database_url.get_secret_value().startswith("postgresql+psycopg://env:")
+
+
+def test_greenloop_env_file_overrides_the_default_path(tmp_path, monkeypatch, fresh_settings):
+    custom = tmp_path / "ci.env"
+    custom.write_text("LOG_LEVEL=ERROR\n")
+    monkeypatch.setenv("GREENLOOP_ENV_FILE", str(custom))
+    assert env_file_path() == custom
+    assert get_settings().log_level == "ERROR"
+
+
+def test_greenloop_env_file_naming_a_missing_file_is_an_error(tmp_path, monkeypatch):
+    monkeypatch.setenv("GREENLOOP_ENV_FILE", str(tmp_path / "missing.env"))
+    with pytest.raises(FileNotFoundError, match="GREENLOOP_ENV_FILE"):
+        env_file_path()
+
+
+def test_blank_greenloop_env_file_falls_back_to_the_default(monkeypatch):
+    monkeypatch.setenv("GREENLOOP_ENV_FILE", "  ")
+    assert env_file_path() == REPO_ROOT / ".env"
+
+
+@pytest.mark.parametrize(
+    "package_file",
+    ["/srv/app/core/config.py", "/opt/deep/tree/elsewhere/app/core/config.py"],
+)
+def test_outside_the_repo_layout_no_env_file_is_used(package_file):
+    assert env_file_path(package_file) is None
+
+
+def test_a_missing_root_env_is_harmless(tmp_path):
+    package_file = tmp_path / "services" / "orchestrator" / "app" / "core" / "config.py"
+    settings = Settings(_env_file=env_file_path(package_file))
+    assert settings.database_url is None
