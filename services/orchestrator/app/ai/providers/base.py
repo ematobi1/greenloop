@@ -1,6 +1,11 @@
-"""Provider-neutral model interface. The orchestrator depends on this, never on a vendor SDK."""
+"""Provider-neutral model interface. The orchestrator depends on this, never on a vendor SDK.
 
-from dataclasses import dataclass, field
+A provider streams TextDelta events and ends with exactly one Done carrying the
+stop reason and token usage, or raises AiError.
+"""
+
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from typing import Literal, Protocol
 
 
@@ -11,21 +16,37 @@ class Message:
 
 
 @dataclass(frozen=True)
-class CompletionRequest:
+class GenerationRequest:
     system: str
     messages: tuple[Message, ...]
-    max_tokens: int = 4096
+    max_output_tokens: int
 
 
 @dataclass(frozen=True)
-class CompletionResponse:
+class TextDelta:
     text: str
-    model: str
+
+
+@dataclass(frozen=True)
+class Done:
     stop_reason: str | None = None
-    usage: dict[str, int] = field(default_factory=dict)
+    input_tokens: int = 0
+    output_tokens: int = 0
+    request_id: str | None = None
+
+
+StreamEvent = TextDelta | Done
+
+
+@dataclass(frozen=True)
+class ProviderConfig:
+    name: str
+    model: str
+    timeout_seconds: float
+    max_retries: int
 
 
 class ModelProvider(Protocol):
-    name: str
+    config: ProviderConfig
 
-    async def complete(self, request: CompletionRequest) -> CompletionResponse: ...
+    def stream(self, request: GenerationRequest) -> AsyncIterator[StreamEvent]: ...

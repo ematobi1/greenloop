@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.ai.providers.registry import build_registry
 from app.api.v1 import health
 from app.api.v1.router import router as v1_router
 from app.core.config import Settings, get_settings
@@ -13,7 +14,8 @@ from app.core.redaction import Redactor
 from app.db.session import make_engine, make_session_factory
 
 ERROR_RESPONSES = {
-    status: {"model": ErrorEnvelope} for status in (400, 401, 403, 404, 422, 500, 501, 503)
+    status: {"model": ErrorEnvelope}
+    for status in (400, 401, 403, 404, 409, 422, 500, 501, 502, 503, 504)
 }
 
 
@@ -27,6 +29,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = (
         make_session_factory(make_engine(settings)) if settings.database_url else None
     )
+    app.state.provider_registry = build_registry(settings)
     register_error_handlers(app)
     install_request_middleware(app, settings.allowed_hosts)
     app.add_middleware(

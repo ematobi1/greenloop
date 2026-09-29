@@ -114,3 +114,66 @@ def make_record() -> Callable[..., MemoryRecord]:
         )
 
     return factory
+
+
+class FakeProvider:
+    """Scripted ModelProvider: yields `chunks`, then Done, or raises `error` after
+    `error_after` chunks. `hang` stalls before the first chunk. Records every request."""
+
+    def __init__(
+        self,
+        chunks=("Hello", " there."),
+        *,
+        error=None,
+        error_after=None,
+        hang=False,
+        usage=(12, 3),
+    ):
+        from app.ai.providers.base import ProviderConfig
+
+        self.config = ProviderConfig(name="fake", model="fake-1", timeout_seconds=5, max_retries=0)
+        self.chunks = list(chunks)
+        self.error = error
+        self.error_after = error_after
+        self.hang = hang
+        self.usage = usage
+        self.requests = []
+
+    async def stream(self, request):
+        import asyncio
+
+        from app.ai.providers.base import Done, TextDelta
+
+        self.requests.append(request)
+        if self.hang:
+            await asyncio.Event().wait()
+        for index, chunk in enumerate(self.chunks):
+            if self.error is not None and index == self.error_after:
+                raise self.error
+            yield TextDelta(chunk)
+            await asyncio.sleep(0)
+        if self.error is not None:
+            raise self.error
+        yield Done(
+            stop_reason="end_turn",
+            input_tokens=self.usage[0],
+            output_tokens=self.usage[1],
+            request_id="req_fake",
+        )
+
+
+@pytest.fixture
+def fake_provider():
+    return FakeProvider()
+
+
+@pytest.fixture
+def use_provider(client):
+    """Install providers on the test app: use_provider(FakeProvider(...), name="fake")."""
+    from app.ai.providers.registry import ProviderRegistry
+
+    def install(provider, name="fake"):
+        client.app.state.provider_registry = ProviderRegistry({name: provider}, name)
+        return provider
+
+    return install
