@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE_VARIABLE = "GREENLOOP_ENV_FILE"
@@ -38,7 +38,19 @@ class Settings(BaseSettings):
 
     anthropic_api_key: SecretStr | None = None
     anthropic_model: str = "claude-opus-5-5"
+    anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_model: str | None = None
     elevenlabs_api_key: SecretStr | None = None
+
+    ai_default_provider: Literal["anthropic", "ollama"] = "anthropic"
+    ai_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
+    ai_max_retries: int = Field(default=2, ge=0, le=5)
+    ai_max_output_tokens: int = Field(default=16000, ge=256, le=128000)
+    ai_context_token_limit: int = Field(default=150000, ge=4000)
+    ai_history_message_limit: int = Field(default=40, ge=0, le=500)
+    ai_max_message_chars: int = Field(default=20000, ge=1, le=200000)
+    ai_memory_record_limit: int = Field(default=20, ge=0, le=100)
 
     def secret_values(self) -> list[str]:
         """Every configured secret value, for exact-match redaction."""
