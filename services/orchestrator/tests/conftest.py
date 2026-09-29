@@ -3,7 +3,7 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
@@ -25,6 +25,16 @@ def session_factory() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+
+    # pysqlite skips BEGIN, which breaks SAVEPOINT; take over transaction control.
+    @event.listens_for(engine, "connect")
+    def _disable_pysqlite_transactions(dbapi_connection, _record):
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _begin(connection):
+        connection.exec_driver_sql("BEGIN")
+
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
