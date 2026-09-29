@@ -1,20 +1,42 @@
 """ORM models. The Alembic migrations in app/db/migrations must match `Base.metadata`.
 
-Every table has created_at and updated_at. audit_records is append-only: a
-database trigger rejects UPDATE, DELETE and TRUNCATE (see the baseline migration).
+Every table has created_at and updated_at. audit_records and memory_records are
+append-only: database triggers reject UPDATE, DELETE and TRUNCATE (see migrations).
 
-TODO(phase-3): memory_records. TODO(phase-4): jobs.
+TODO(phase-4): jobs.
 """
 
 from datetime import UTC, datetime
+from enum import StrEnum
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, String, func
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.engine import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
-from greenloop_contracts import AuditOutcome, AuditRecord
+from greenloop_contracts import (
+    AuditOutcome,
+    AuditRecord,
+    MemoryCategory,
+    MemoryConfidence,
+    MemoryOperation,
+    MemoryRecord,
+    MemoryScope,
+    MemorySource,
+    Provenance,
+)
 
 
 class UtcDateTime(TypeDecorator[datetime]):
@@ -34,6 +56,13 @@ class UtcDateTime(TypeDecorator[datetime]):
         if value is None:
             return None
         return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
+
+
+JsonDocument = JSON().with_variant(JSONB(), "postgresql")
+
+
+def _in(column: str, values: type[StrEnum]) -> str:
+    return f"{column} IN ({', '.join(repr(member.value) for member in values)})"
 
 
 class Base(DeclarativeBase):
@@ -69,13 +98,10 @@ class ApiTokenRow(TimestampMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 
-AUDIT_OUTCOMES = ", ".join(f"'{outcome.value}'" for outcome in AuditOutcome)
-
-
 class AuditRecordRow(TimestampMixin, Base):
     __tablename__ = "audit_records"
     __table_args__ = (
-        CheckConstraint(f"outcome IN ({AUDIT_OUTCOMES})", name="ck_audit_records_outcome"),
+        CheckConstraint(_in("outcome", AuditOutcome), name="ck_audit_records_outcome"),
         Index("ix_audit_records_principal_occurred", "principal_id", "occurred_at"),
     )
 
@@ -89,7 +115,7 @@ class AuditRecordRow(TimestampMixin, Base):
     correlation_id: Mapped[str] = mapped_column(String(128), index=True)
     operation_hash: Mapped[str | None] = mapped_column(String(64))
     approval_id: Mapped[str | None] = mapped_column(String(128))
-    details: Mapped[dict] = mapped_column(JSON().with_variant(JSONB(), "postgresql"))
+    details: Mapped[dict] = mapped_column(JsonDocument)
     occurred_at: Mapped[datetime] = mapped_column(UtcDateTime())
 
     @classmethod
@@ -98,3 +124,107 @@ class AuditRecordRow(TimestampMixin, Base):
 
     def to_contract(self) -> AuditRecord:
         return AuditRecord(**{name: getattr(self, name) for name in AuditRecord.model_fields})
+
+
+class MemoryRecordRow(TimestampMixin, Base):
+    """One version of a memory. A chain is a create followed by supersede, correct or
+    delete records, each naming its predecessor. The head of a chain is the version
+    nobody supersedes.
+
+    The database guarantees the chain shape: each record has at most one successor
+    (unique `supersedes`), and a successor keeps its predecessor's principal, chain and
+    scope (composite foreign key). `chain_id` is the record_id of the chain's create.
+    """
+
+    __tablename__ = "memory_records"
+    __table_args__ = (
+        UniqueConstraint("supersedes", name="uq_memory_records_supersedes"),
+        UniqueConstraint(
+            "record_id", "principal_id", "chain_id", "scope", name="uq_memory_records_lineage"
+        ),
+        ForeignKeyConstraint(
+            ["supersedes", "principal_id", "chain_id", "scope"],
+            [
+                "memory_records.record_id",
+                "memory_records.principal_id",
+                "memory_records.chain_id",
+                "memory_records.scope",
+            ],
+            name="fk_memory_records_predecessor",
+        ),
+        CheckConstraint(_in("scope", MemoryScope), name="ck_memory_records_scope"),
+        CheckConstraint(_in("category", MemoryCategory), name="ck_memory_records_category"),
+        CheckConstraint(_in("confidence", MemoryConfidence), name="ck_memory_records_confidence"),
+        CheckConstraint(_in("operation", MemoryOperation), name="ck_memory_records_operation"),
+        CheckConstraint(_in("source", MemorySource), name="ck_memory_records_source"),
+        CheckConstraint(
+            "(operation = 'create') = (supersedes IS NULL)", name="ck_memory_records_supersedes"
+        ),
+        CheckConstraint(
+            "(operation = 'create') = (chain_id = record_id)", name="ck_memory_records_chain_root"
+        ),
+        CheckConstraint(
+            "(operation = 'delete') = (content = '')", name="ck_memory_records_tombstone"
+        ),
+        Index("ix_memory_records_principal_chain", "principal_id", "chain_id"),
+        Index("ix_memory_records_principal_created", "principal_id", "created_at"),
+    )
+
+    record_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), ForeignKey("principals.principal_id"))
+    chain_id: Mapped[str] = mapped_column(String(128))
+    scope: Mapped[str] = mapped_column(String(16))
+    category: Mapped[str] = mapped_column(String(32))
+    confidence: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    tags: Mapped[list] = mapped_column(JsonDocument)
+    related_task_id: Mapped[str | None] = mapped_column(String(128))
+    source: Mapped[str] = mapped_column(String(16))
+    source_ref: Mapped[str | None] = mapped_column(String(500))
+    created_by: Mapped[str] = mapped_column(String(128))
+    operation: Mapped[str] = mapped_column(String(16))
+    supersedes: Mapped[str | None] = mapped_column(String(128))
+    expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+    @classmethod
+    def from_contract(cls, record: MemoryRecord, chain_id: str) -> "MemoryRecordRow":
+        provenance = record.provenance
+        return cls(
+            record_id=record.record_id,
+            principal_id=record.principal_id,
+            chain_id=chain_id,
+            scope=record.scope,
+            category=record.category,
+            confidence=record.confidence,
+            content=record.content,
+            tags=list(record.tags),
+            related_task_id=record.related_task_id,
+            source=provenance.source,
+            source_ref=provenance.source_ref,
+            created_by=provenance.created_by,
+            operation=provenance.operation,
+            supersedes=provenance.supersedes,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+        )
+
+    def to_contract(self) -> MemoryRecord:
+        return MemoryRecord(
+            record_id=self.record_id,
+            principal_id=self.principal_id,
+            scope=MemoryScope(self.scope),
+            category=MemoryCategory(self.category),
+            confidence=MemoryConfidence(self.confidence),
+            content=self.content,
+            tags=tuple(self.tags),
+            related_task_id=self.related_task_id,
+            provenance=Provenance(
+                source=MemorySource(self.source),
+                source_ref=self.source_ref,
+                created_by=self.created_by,
+                operation=MemoryOperation(self.operation),
+                supersedes=self.supersedes,
+            ),
+            created_at=self.created_at,
+            expires_at=self.expires_at,
+        )
