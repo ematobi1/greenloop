@@ -27,3 +27,4 @@ Monorepo at the root of this VS Code folder. See ARCHITECTURE.md for the full fo
 - Windows 11 Home and PowerShell. Don't assume WSL2, Docker, Hyper-V, or Windows Sandbox.
 - Use the prompt-engineer subagent for any change to LLM-facing prompt text (for example app/ai/prompts.py, app/ai/context.py framing, planner or agent prompts).
 - Label what is verified versus inferred.
+- For multi-step features, use the greenloop-dev-loop skill; its boundaries apply on top of these rules.
