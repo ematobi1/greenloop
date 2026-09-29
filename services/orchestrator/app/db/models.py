@@ -3,6 +3,8 @@
 Every table has created_at and updated_at. audit_records and memory_records are
 append-only: database triggers reject UPDATE, DELETE and TRUNCATE (see migrations).
 
+Conversations are soft-deleted (deleted_at); a trigger rejects UPDATE on messages.
+
 TODO(phase-4): jobs.
 """
 
@@ -16,6 +18,7 @@ from sqlalchemy import (
     ForeignKey,
     ForeignKeyConstraint,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -237,3 +240,52 @@ class MemoryRecordRow(TimestampMixin, Base):
             created_at=self.created_at,
             expires_at=self.expires_at,
         )
+
+
+class MessageRole(StrEnum):
+    USER = "user"
+    ASSISTANT = "assistant"
+
+
+class MessageStatus(StrEnum):
+    """`incomplete`: the stream stopped early (provider error, disconnect); partial text kept."""
+
+    COMPLETE = "complete"
+    INCOMPLETE = "incomplete"
+
+
+class ConversationRow(TimestampMixin, Base):
+    __tablename__ = "conversations"
+    __table_args__ = (Index("ix_conversations_principal_updated", "principal_id", "updated_at"),)
+
+    conversation_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), ForeignKey("principals.principal_id"))
+    title: Mapped[str] = mapped_column(String(200))
+    deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class MessageRow(TimestampMixin, Base):
+    """One chat turn. (conversation_id, sequence) is unique, which orders the transcript and
+    makes two writers racing for the same sequence number fail instead of interleaving."""
+
+    __tablename__ = "messages"
+    __table_args__ = (
+        UniqueConstraint("conversation_id", "sequence", name="uq_messages_conversation_sequence"),
+        CheckConstraint(_in("role", MessageRole), name="ck_messages_role"),
+        CheckConstraint(_in("status", MessageStatus), name="ck_messages_status"),
+        CheckConstraint("sequence >= 1", name="ck_messages_sequence_positive"),
+    )
+
+    message_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("conversations.conversation_id")
+    )
+    sequence: Mapped[int] = mapped_column(Integer)
+    role: Mapped[str] = mapped_column(String(16))
+    content: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str | None] = mapped_column(String(32))
+    model: Mapped[str | None] = mapped_column(String(128))
+    input_tokens: Mapped[int | None] = mapped_column(Integer)
+    output_tokens: Mapped[int | None] = mapped_column(Integer)
+    correlation_id: Mapped[str] = mapped_column(String(128))
