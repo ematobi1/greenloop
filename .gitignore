@@ -43,3 +43,6 @@ Thumbs.db
 
 # Scaffold-only file
 SCAFFOLD_PROMPT.md
+
+# Dev-loop working memory (local only)
+.dev-loop/
