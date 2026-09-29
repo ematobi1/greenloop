@@ -4,19 +4,15 @@ Skipped unless TEST_DATABASE_URL points at a disposable database. Every run
 downgrades to base and upgrades to head, so never point it at real data.
 """
 
-import os
 import uuid
-from pathlib import Path
 
 import pytest
-from alembic import command
 from alembic.autogenerate import compare_metadata
-from alembic.config import Config
 from alembic.migration import MigrationContext
 from fastapi.testclient import TestClient
-from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy import inspect, text
 from sqlalchemy.exc import DBAPIError, IntegrityError
-from sqlalchemy.orm import sessionmaker
+from tests.integration.pg import TEST_DATABASE_URL, alembic_command
 
 from app.audit import recorder
 from app.core import tokens
@@ -25,43 +21,9 @@ from app.db.models import Base
 from app.db.session import make_engine
 from app.main import create_app
 
-TEST_DATABASE_URL = os.environ.get("TEST_DATABASE_URL")
-SERVICE_ROOT = Path(__file__).resolve().parents[2]
-
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL, reason="TEST_DATABASE_URL not set; Postgres integration skipped"
 )
-
-
-def _alembic(engine: Engine, *args: str) -> None:
-    config = Config(str(SERVICE_ROOT / "alembic.ini"))
-    config.set_main_option("script_location", str(SERVICE_ROOT / "app" / "db" / "migrations"))
-    with engine.begin() as connection:
-        config.attributes["connection"] = connection
-        getattr(command, args[0])(config, *args[1:])
-
-
-@pytest.fixture(scope="module")
-def engine():
-    engine = create_engine(TEST_DATABASE_URL)
-    _alembic(engine, "downgrade", "base")
-    _alembic(engine, "upgrade", "head")
-    yield engine
-    engine.dispose()
-
-
-@pytest.fixture
-def pg_session_factory(engine):
-    return sessionmaker(bind=engine, expire_on_commit=False)
-
-
-@pytest.fixture
-def principal_id(pg_session_factory) -> str:
-    principal_id = f"it-{uuid.uuid4().hex[:12]}"
-    with pg_session_factory() as session:
-        tokens.create_principal(session, principal_id, "Integration")
-        session.commit()
-    return principal_id
 
 
 def test_models_match_the_migration(engine):
@@ -143,7 +105,38 @@ def test_statement_timeout_is_applied_by_make_engine():
 
 
 def test_downgrade_removes_everything_and_upgrade_restores_it(engine):
-    _alembic(engine, "downgrade", "base")
+    alembic_command(engine, "downgrade", "base")
     assert set(inspect(engine).get_table_names()) <= {"alembic_version"}
-    _alembic(engine, "upgrade", "head")
+    alembic_command(engine, "upgrade", "head")
     assert {"principals", "api_tokens", "audit_records"} <= set(inspect(engine).get_table_names())
+
+
+def test_0003_backfills_existing_principals_as_user_and_constrains_role(engine):
+    alembic_command(engine, "downgrade", "0002")
+    try:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO principals (principal_id, display_name)"
+                    " VALUES ('pre-0003', 'Existing')"
+                )
+            )
+        alembic_command(engine, "upgrade", "0003")
+        with engine.connect() as connection:
+            role = connection.scalar(
+                text("SELECT role FROM principals WHERE principal_id = 'pre-0003'")
+            )
+        assert role == "user"
+        column = next(c for c in inspect(engine).get_columns("principals") if c["name"] == "role")
+        assert column["nullable"] is False
+        for bad_role, error in (("admin", "ck_principals_role"), (None, "not-null")):
+            with engine.begin() as connection, pytest.raises(IntegrityError, match=error):
+                connection.execute(
+                    text(
+                        "INSERT INTO principals (principal_id, display_name, role)"
+                        " VALUES (:id, 'Bad', :role)"
+                    ),
+                    {"id": f"bad-{uuid.uuid4().hex[:8]}", "role": bad_role},
+                )
+    finally:
+        alembic_command(engine, "upgrade", "head")

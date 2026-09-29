@@ -3,13 +3,13 @@ from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import Session, sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from app.core import tokens
 from app.core.config import Settings
-from app.db.models import Base, PrincipalRow
+from app.db.models import Base, PrincipalRole, PrincipalRow
 from app.main import create_app
 from greenloop_contracts import AuditOutcome, AuditRecord, MemoryRecord
 
@@ -25,6 +25,16 @@ def session_factory() -> sessionmaker[Session]:
     engine = create_engine(
         "sqlite://", connect_args={"check_same_thread": False}, poolclass=StaticPool
     )
+
+    # pysqlite skips BEGIN, which breaks SAVEPOINT; take over transaction control.
+    @event.listens_for(engine, "connect")
+    def _disable_pysqlite_transactions(dbapi_connection, _record):
+        dbapi_connection.isolation_level = None
+
+    @event.listens_for(engine, "begin")
+    def _begin(connection):
+        connection.exec_driver_sql("BEGIN")
+
     Base.metadata.create_all(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -40,10 +50,10 @@ def client(settings: Settings, session_factory: sessionmaker[Session]) -> TestCl
 def issue_token(session_factory: sessionmaker[Session]) -> Callable[..., str]:
     """Create the principal if needed and return a fresh bearer token for it."""
 
-    def factory(principal_id: str = "user-1") -> str:
+    def factory(principal_id: str = "user-1", role: PrincipalRole = PrincipalRole.USER) -> str:
         with session_factory() as session:
             if session.get(PrincipalRow, principal_id) is None:
-                tokens.create_principal(session, principal_id, principal_id.title())
+                tokens.create_principal(session, principal_id, principal_id.title(), role)
             _, token = tokens.issue_token(session, principal_id, "test")
             session.commit()
         return token
