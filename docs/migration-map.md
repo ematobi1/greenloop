@@ -49,7 +49,7 @@ Source: branch `feature/canonical-orchestrator` at `69628c9`. Decisions are reco
 | 1 | Core platform: single Redactor, structured logging, errors, request id, Host allowlist, CORS | ported |
 | 2 | Postgres baseline, token auth to principals, audit records, `/v1/health` readiness | ported |
 | 3 | Append-only memory store on Postgres | ported |
-| 4 | Conversations, streaming AI engine, providers, prompts | not started |
+| 4 | Conversations (soft delete, write-once messages), streaming AI engine (JSON and SSE), Anthropic and Ollama providers, prompts, chat behavior eval (`evals/chat_behavior.py`) | ported; first paid eval run pending |
 | 5 | Agents, dispatch, execution memory, approvals API | not started |
 
 ## Porting rules
