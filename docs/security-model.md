@@ -21,9 +21,11 @@ Every request acts for exactly one principal. Memory, approvals and audit record
 
 - Append-only with provenance. Supersede, correct and delete append a new record; nothing is edited in place.
 - The database enforces it (`memory_records`, migration 0002): triggers reject UPDATE, DELETE and TRUNCATE; a unique `supersedes` column gives each record at most one successor, so concurrent revisions cannot fork a chain (the loser gets 409); a composite foreign key keeps a successor on its predecessor's principal, chain and scope.
-- Reads and writes are owner-only for both scopes until a sharing policy exists. A record owned by someone else returns the same 404 as a missing one. Owner and provenance (`source=user`, `created_by`) come from the token, never the request body, and new records start unverified.
+- Memory is owner-only. Creating a `shared` record is refused (422 `SHARED_SCOPE_UNAVAILABLE`) until a sharing policy exists, and a chain cannot change scope, so no shared record can appear. A record owned by someone else returns the same 404 as a missing one. Owner and provenance (`source=user`, `created_by`) come from the token, never the request body.
+- New records start unverified. Only a `system` principal (`principals.role`, set with `python -m app.cli create-principal ... --role system`) may mark a revision verified; anyone else gets 403 `VERIFICATION_NOT_ALLOWED`.
+- A deleted chain is gone from the API: every version and the tombstone return 404.
 - Every memory write adds its audit record in the same transaction. Audit details carry ids only, never memory content.
-- A delete is a tombstone with empty content, so deleted personal data is not copied into new rows, and the whole chain disappears from the API. Earlier versions still hold their content in the table. Physical purge on request (GDPR/CCPA) needs a separate, privileged, audited path that bypasses the append-only trigger; it is not built yet.
+- A delete is a tombstone with empty content, so deleted personal data is not copied into new rows, and the whole chain disappears from the API. Earlier versions still hold their content in the table. Real erasure on request (GDPR/CCPA) is not built yet; the proposed design is crypto-shredding (a per-chain data key, destroyed on delete). It blocks production.
 - Retrieved memory is untrusted. It can hold prompt injection, markup that tries to close the memory block, or secrets a user pasted. The context builder normalizes (NFKC), strips control and invisible characters, redacts secrets with the shared `Redactor` (`app/core/redaction.py`), truncates, and escapes `&`, `<` and `>`. The system prompt frames the block as reference data and tells the model to report embedded instructions.
 
 ## Consequential actions

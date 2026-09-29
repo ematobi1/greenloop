@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.core.errors import ApiError
 from app.core.tokens import find_active_principal
+from app.db.models import PrincipalRole
 from app.db.session import get_session
 
 logger = structlog.get_logger(__name__)
@@ -26,6 +27,11 @@ bearer_scheme = HTTPBearer(auto_error=False)
 class Principal:
     principal_id: str
     display_name: str
+    role: PrincipalRole = PrincipalRole.USER
+
+    @property
+    def is_system(self) -> bool:
+        return self.role is PrincipalRole.SYSTEM
 
 
 def _unauthenticated() -> ApiError:
@@ -48,7 +54,11 @@ def get_current_principal(
         logger.warning("authentication_failed")
         raise _unauthenticated()
     structlog.contextvars.bind_contextvars(principal_id=row.principal_id)
-    return Principal(principal_id=row.principal_id, display_name=row.display_name)
+    return Principal(
+        principal_id=row.principal_id,
+        display_name=row.display_name,
+        role=PrincipalRole(row.role),
+    )
 
 
 CurrentPrincipal = Annotated[Principal, Depends(get_current_principal)]

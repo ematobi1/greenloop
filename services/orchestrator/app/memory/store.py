@@ -7,8 +7,8 @@ same head both pass the head check, but the unique `supersedes` constraint lets
 only one insert through; the other gets MemoryConflictError.
 
 Every query filters by principal server-side, and a record owned by someone else
-looks exactly like a missing one. Shared-scope records are readable only by their
-owner until a sharing policy exists.
+looks exactly like a missing one. Until a sharing policy exists, creating a
+shared-scope record is refused (a chain keeps its scope, so none can appear later).
 
 Every write adds an AuditRecord to the same session, so the memory row and its
 audit entry commit or roll back together. The caller commits.
@@ -44,6 +44,10 @@ class MemoryConflictError(Exception):
     pass
 
 
+class MemorySharingUnavailableError(Exception):
+    pass
+
+
 _successor = aliased(MemoryRecordRow)
 _has_no_successor = ~exists().where(_successor.supersedes == MemoryRecordRow.record_id)
 
@@ -60,6 +64,8 @@ class MemoryStore:
     def create(self, record: MemoryRecord) -> MemoryRecord:
         if record.provenance.operation is not MemoryOperation.CREATE:
             raise ValueError("create takes a create record; use revise or delete")
+        if record.scope is MemoryScope.SHARED:
+            raise MemorySharingUnavailableError(record.record_id)
         self._insert(record, chain_id=record.record_id)
         return record
 

@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from app.core import tokens
 from app.core.config import Settings
-from app.db.models import Base, PrincipalRow
+from app.db.models import Base, PrincipalRole, PrincipalRow
 from app.main import create_app
 from greenloop_contracts import AuditOutcome, AuditRecord, MemoryRecord
 
@@ -50,10 +50,10 @@ def client(settings: Settings, session_factory: sessionmaker[Session]) -> TestCl
 def issue_token(session_factory: sessionmaker[Session]) -> Callable[..., str]:
     """Create the principal if needed and return a fresh bearer token for it."""
 
-    def factory(principal_id: str = "user-1") -> str:
+    def factory(principal_id: str = "user-1", role: PrincipalRole = PrincipalRole.USER) -> str:
         with session_factory() as session:
             if session.get(PrincipalRow, principal_id) is None:
-                tokens.create_principal(session, principal_id, principal_id.title())
+                tokens.create_principal(session, principal_id, principal_id.title(), role)
             _, token = tokens.issue_token(session, principal_id, "test")
             session.commit()
         return token

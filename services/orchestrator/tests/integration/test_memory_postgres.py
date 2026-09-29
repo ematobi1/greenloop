@@ -11,7 +11,7 @@ from tests.integration.pg import TEST_DATABASE_URL
 
 from app.core import tokens
 from app.core.config import Settings
-from app.db.models import MemoryRecordRow
+from app.db.models import AuditRecordRow, MemoryRecordRow
 from app.main import create_app
 from app.memory import provenance
 from app.memory.store import MemoryConflictError, MemoryStore
@@ -120,7 +120,64 @@ def test_a_tombstone_cannot_keep_content(pg_session_factory, stored):
         session.commit()
 
 
-def test_concurrent_revisions_of_one_head_let_exactly_one_win(pg_session_factory, stored):
+def _api_client(pg_session_factory, principal_id):
+    with pg_session_factory() as session:
+        _, token = tokens.issue_token(session, principal_id, "it")
+        session.commit()
+    app = create_app(Settings(_env_file=None, environment="test", allowed_hosts=["testserver"]))
+    app.state.session_factory = pg_session_factory
+    return app, {"Authorization": f"Bearer {token}"}
+
+
+def test_concurrent_revisions_of_one_head_return_201_and_409(
+    pg_session_factory, stored, monkeypatch
+):
+    """Both requests pass the head check before either inserts, so the loser only
+    finds out from the unique `supersedes` constraint. It must get 409, never 500."""
+    app, auth = _api_client(pg_session_factory, stored.principal_id)
+    both_checked_head = threading.Barrier(2, timeout=10)
+    real_supersede = provenance.supersede
+
+    def supersede_after_both_checked(*args, **kwargs):
+        both_checked_head.wait()
+        return real_supersede(*args, **kwargs)
+
+    monkeypatch.setattr(provenance, "supersede", supersede_after_both_checked)
+    responses = []
+
+    def revise(content: str) -> None:
+        responses.append(
+            TestClient(app).post(
+                f"/v1/memory-records/{stored.record_id}/revisions",
+                headers=auth,
+                json={"operation": "supersede", "content": content},
+            )
+        )
+
+    threads = [threading.Thread(target=revise, args=(f"v2-{n}",)) for n in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+
+    assert sorted(response.status_code for response in responses) == [201, 409]
+    loser = next(response for response in responses if response.status_code == 409)
+    assert loser.json()["error"]["code"] == "MEMORY_RECORD_CONFLICT"
+    with pg_session_factory() as session:
+        successors = session.scalars(
+            select(MemoryRecordRow).where(MemoryRecordRow.supersedes == stored.record_id)
+        ).all()
+        revise_audits = session.scalars(
+            select(AuditRecordRow).where(
+                AuditRecordRow.action == "memory.supersede",
+                AuditRecordRow.principal_id == stored.principal_id,
+            )
+        ).all()
+    assert len(successors) == 1
+    assert [row.resource_id for row in revise_audits] == [successors[0].record_id]
+
+
+def test_store_race_raises_conflict_not_integrity_error(pg_session_factory, stored):
     both_checked_head = threading.Barrier(2, timeout=10)
     outcomes: list[str] = []
 
@@ -135,7 +192,6 @@ def test_concurrent_revisions_of_one_head_let_exactly_one_win(pg_session_factory
                 session.commit()
                 outcomes.append("won")
             except MemoryConflictError:
-                session.rollback()
                 outcomes.append("conflict")
 
     threads = [threading.Thread(target=revise, args=(f"v2-{n}",)) for n in range(2)]
@@ -144,11 +200,6 @@ def test_concurrent_revisions_of_one_head_let_exactly_one_win(pg_session_factory
     for thread in threads:
         thread.join(timeout=30)
     assert sorted(outcomes) == ["conflict", "won"]
-    with pg_session_factory() as session:
-        successors = session.scalars(
-            select(MemoryRecordRow).where(MemoryRecordRow.supersedes == stored.record_id)
-        ).all()
-    assert len(successors) == 1
 
 
 def test_end_to_end_memory_api_on_postgres(pg_session_factory, principal_id):
@@ -188,6 +239,18 @@ def test_end_to_end_memory_api_on_postgres(pg_session_factory, principal_id):
     history = client.get(f"/v1/memory-records/{record_id}/history", headers=auth).json()
     assert [item["provenance"]["operation"] for item in history["data"]] == ["create", "correct"]
     assert client.delete(f"/v1/memory-records/{record_id}", headers=auth).status_code == 204
-    assert client.get(f"/v1/memory-records/{record_id}", headers=auth).status_code == 404
+    tombstone_id = next(
+        a["resource_id"]
+        for a in client.get("/v1/audit-records", headers=auth, params={"limit": 100}).json()["data"]
+        if a["action"] == "memory.delete"
+    )
+    for version in (record_id, revised.json()["record_id"], tombstone_id):
+        assert client.get(f"/v1/memory-records/{version}", headers=auth).status_code == 404
+    shared = client.post(
+        "/v1/memory-records",
+        headers=auth,
+        json={"scope": "shared", "category": "decision", "content": "x"},
+    )
+    assert shared.status_code == 422
     audit = client.get("/v1/audit-records", headers=auth, params={"limit": 100}).json()["data"]
     assert {"memory.create", "memory.correct", "memory.delete"} <= {a["action"] for a in audit}

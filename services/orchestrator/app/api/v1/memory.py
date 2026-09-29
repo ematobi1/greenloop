@@ -2,9 +2,10 @@
 
 The owner is always the caller and provenance is always `source=user,
 created_by=<caller>`; neither is accepted from the request body. New records
-start unverified. A revision (supersede or correct) and a delete (tombstone)
-each append a record; nothing is edited in place. Every write is audited in the
-same transaction.
+start unverified, and only a system principal may mark a revision verified.
+Shared scope is refused until a sharing policy exists. A revision (supersede or
+correct) and a delete (tombstone) each append a record; nothing is edited in
+place. Every write is audited in the same transaction.
 """
 
 from datetime import UTC, datetime
@@ -26,7 +27,12 @@ from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError
 from app.db.session import get_session
 from app.memory import provenance
-from app.memory.store import MemoryConflictError, MemoryNotFoundError, MemoryStore
+from app.memory.store import (
+    MemoryConflictError,
+    MemoryNotFoundError,
+    MemorySharingUnavailableError,
+    MemoryStore,
+)
 from greenloop_contracts import (
     MemoryCategory,
     MemoryConfidence,
@@ -160,7 +166,15 @@ def create_memory_record(
         )
     except ValidationError as err:
         raise _invalid(err) from None
-    store.create(record)
+    try:
+        store.create(record)
+    except MemorySharingUnavailableError:
+        raise ApiError(
+            422,
+            "SHARED_SCOPE_UNAVAILABLE",
+            "Shared memory is not available yet. Use scope 'private'.",
+            fields={"scope": "Shared scope is disabled until a sharing policy exists."},
+        ) from None
     session.commit()
     return record
 
@@ -195,6 +209,13 @@ def create_memory_revision(
     store: Store,
     session: DbSession,
 ) -> MemoryRecord:
+    if body.confidence == "verified" and not principal.is_system:
+        raise ApiError(
+            403,
+            "VERIFICATION_NOT_ALLOWED",
+            "Only a system principal can mark memory verified.",
+        )
+
     def build(original: MemoryRecord) -> MemoryRecord:
         if body.operation == "correct":
             return provenance.correct(

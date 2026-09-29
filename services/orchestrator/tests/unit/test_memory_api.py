@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from app.db.models import AuditRecordRow
+from app.db.models import AuditRecordRow, PrincipalRole
 from greenloop_contracts import MemoryRecord
 
 URL = "/v1/memory-records"
@@ -124,7 +124,7 @@ def test_past_expiry_is_rejected_without_echoing_content(client, auth):
 
 def test_get_and_list_are_scoped_to_the_caller(client, auth, other_auth, create):
     mine = create("mine")
-    theirs = create("theirs", headers=other_auth, scope="shared")
+    theirs = create("theirs", headers=other_auth)
     assert client.get(f"{URL}/{mine['record_id']}", headers=auth).status_code == 200
     hidden = client.get(f"{URL}/{theirs['record_id']}", headers=auth)
     assert hidden.status_code == 404
@@ -153,12 +153,13 @@ def test_list_rejects_out_of_range_params(client, auth, params):
 def test_supersede_appends_and_history_shows_the_chain(client, auth, create):
     v1 = create("v1", tags=["a"])
     response = _revise(
-        client, auth, v1["record_id"], operation="supersede", content="v2", confidence="verified"
+        client, auth, v1["record_id"], operation="supersede", content="v2", category="decision"
     )
     assert response.status_code == 201
     v2 = response.json()
     assert v2["provenance"]["supersedes"] == v1["record_id"]
-    assert v2["confidence"] == "verified"
+    assert v2["confidence"] == "unverified"
+    assert v2["category"] == "decision"
     assert v2["tags"] == ["a"]
     assert client.get(f"{URL}/{v1['record_id']}", headers=auth).json()["content"] == "v1"
     history = client.get(f"{URL}/{v2['record_id']}/history", headers=auth).json()
@@ -242,3 +243,80 @@ def test_audit_details_never_contain_memory_content(client, auth, create, sessio
     with session_factory() as session:
         details = [row.details for row in session.scalars(select(AuditRecordRow))]
     assert "passport" not in str(details)
+
+
+def test_shared_scope_is_refused_with_a_clear_error(client, auth):
+    response = client.post(
+        URL, headers=auth, json={"scope": "shared", "category": "decision", "content": "x"}
+    )
+    assert response.status_code == 422
+    error = response.json()["error"]
+    assert error["code"] == "SHARED_SCOPE_UNAVAILABLE"
+    assert "sharing policy" in error["fields"]["scope"]
+    assert client.get(URL, headers=auth).json()["meta"]["total"] == 0
+
+
+def test_list_still_accepts_a_shared_filter_and_finds_nothing(client, auth, create):
+    create("private one")
+    assert client.get(URL, headers=auth, params={"scope": "shared"}).json()["meta"]["total"] == 0
+
+
+def test_a_user_cannot_mark_memory_verified(client, auth, create, session_factory):
+    v1 = create("claim")
+    response = _revise(
+        client, auth, v1["record_id"], operation="supersede", content="claim", confidence="verified"
+    )
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "VERIFICATION_NOT_ALLOWED"
+    history = client.get(f"{URL}/{v1['record_id']}/history", headers=auth).json()
+    assert history["meta"]["total"] == 1
+    with session_factory() as session:
+        actions = [row.action for row in session.scalars(select(AuditRecordRow))]
+    assert "memory.supersede" not in actions
+
+
+def test_a_user_may_keep_a_revision_unverified_explicitly(client, auth, create):
+    v1 = create("claim")
+    response = _revise(
+        client, auth, v1["record_id"], operation="supersede", content="c", confidence="unverified"
+    )
+    assert response.status_code == 201
+
+
+def test_a_system_principal_can_mark_its_memory_verified(client, issue_token):
+    system = {"Authorization": f"Bearer {issue_token('verifier', PrincipalRole.SYSTEM)}"}
+    v1 = client.post(
+        URL,
+        headers=system,
+        json={"scope": "private", "category": "verified_outcome", "content": "Deploy passed."},
+    ).json()
+    response = _revise(
+        client,
+        system,
+        v1["record_id"],
+        operation="supersede",
+        content="Deploy passed.",
+        confidence="verified",
+    )
+    assert response.status_code == 201
+    assert response.json()["confidence"] == "verified"
+
+
+def test_every_version_and_the_tombstone_of_a_deleted_chain_are_404(
+    client, auth, create, session_factory
+):
+    v1 = create("v1")
+    v2 = _revise(client, auth, v1["record_id"], operation="supersede", content="v2").json()
+    v3 = _revise(client, auth, v2["record_id"], operation="correct", content="v3").json()
+    assert client.delete(f"{URL}/{v2['record_id']}", headers=auth).status_code == 204
+    with session_factory() as session:
+        tombstone_id = session.scalars(
+            select(AuditRecordRow.resource_id).where(AuditRecordRow.action == "memory.delete")
+        ).one()
+    for record_id in (v1["record_id"], v2["record_id"], v3["record_id"], tombstone_id):
+        response = client.get(f"{URL}/{record_id}", headers=auth)
+        assert response.status_code == 404, record_id
+        assert response.json()["error"]["code"] == "MEMORY_RECORD_NOT_FOUND"
+        assert client.get(f"{URL}/{record_id}/history", headers=auth).status_code == 404
+        revision = _revise(client, auth, record_id, operation="supersede", content="back")
+        assert revision.status_code == 404
