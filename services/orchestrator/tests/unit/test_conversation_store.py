@@ -2,6 +2,7 @@ import pytest
 from sqlalchemy import select
 
 from app.conversations.store import (
+    ConversationBusyError,
     ConversationNotFoundError,
     ConversationStore,
     SequenceConflictError,
@@ -125,3 +126,63 @@ def test_a_sequence_that_never_frees_up_raises_conflict(session, monkeypatch):
 
     with pytest.raises(SequenceConflictError):
         store.append(conversation_id, MessageRole.USER, "second")
+
+
+def _lease(session, conversation_id):
+    session.expire_all()
+    row = _store(session).get(conversation_id)
+    return row.active_turn_id, row.turn_lease_expires_at
+
+
+def test_a_held_turn_lease_makes_the_conversation_busy_until_released(session):
+    store = _store(session)
+    conversation_id = store.create("Chat").conversation_id
+    store.claim_turn(conversation_id, "turn-a", 60)
+    with pytest.raises(ConversationBusyError):
+        store.claim_turn(conversation_id, "turn-b", 60)
+
+    store.release_turn(conversation_id, "turn-a")
+    store.claim_turn(conversation_id, "turn-b", 60)
+    assert _lease(session, conversation_id)[0] == "turn-b"
+
+
+def test_an_expired_lease_can_be_taken_over(session):
+    store = _store(session)
+    conversation_id = store.create("Chat").conversation_id
+    store.claim_turn(conversation_id, "turn-crashed", -1)
+    store.claim_turn(conversation_id, "turn-next", 60)
+    assert _lease(session, conversation_id)[0] == "turn-next"
+
+
+def test_only_the_holder_can_renew_or_release(session):
+    store = _store(session)
+    conversation_id = store.create("Chat").conversation_id
+    store.claim_turn(conversation_id, "turn-a", 60)
+    _, first_expiry = _lease(session, conversation_id)
+
+    assert store.renew_turn(conversation_id, "turn-a", 600)
+    assert _lease(session, conversation_id)[1] > first_expiry
+    assert not store.renew_turn(conversation_id, "turn-other", 600)
+    store.release_turn(conversation_id, "turn-other")
+    assert _lease(session, conversation_id)[0] == "turn-a"
+
+
+def test_another_principal_cannot_claim_or_release(session):
+    store = _store(session)
+    conversation_id = store.create("Chat").conversation_id
+    store.claim_turn(conversation_id, "turn-a", 60)
+    other = _store(session, "user-2")
+
+    with pytest.raises(ConversationNotFoundError):
+        other.claim_turn(conversation_id, "turn-b", 60)
+    other.release_turn(conversation_id, "turn-a")
+    assert not other.renew_turn(conversation_id, "turn-a", 60)
+    assert _lease(session, conversation_id)[0] == "turn-a"
+
+
+def test_a_deleted_conversation_cannot_be_claimed(session):
+    store = _store(session)
+    conversation_id = store.create("Chat").conversation_id
+    store.delete(conversation_id)
+    with pytest.raises(ConversationNotFoundError):
+        store.claim_turn(conversation_id, "turn-a", 60)

@@ -3,7 +3,9 @@
 POST /{id}/messages stores the user message, then answers either as JSON (the
 whole reply) or, when the client sends `Accept: text/event-stream`, as SSE:
 `message` (the stored user message), `delta` events, then `done` (the stored reply)
-or `error` (a safe code and message, plus any partial reply that was kept).
+or `error` (a safe code and message, plus any partial reply that was kept). While a
+turn is in flight, another message to the same conversation gets 409
+CONVERSATION_BUSY and is not stored.
 """
 
 import asyncio
@@ -21,6 +23,7 @@ from app.ai.engine import ChatEngine, Delta, Failed, Finished, PreparedTurn
 from app.ai.errors import AiError
 from app.api.v1.pagination import Limit, Offset, PageMeta
 from app.conversations.store import (
+    ConversationBusyError,
     ConversationNotFoundError,
     ConversationStore,
     SequenceConflictError,
@@ -194,6 +197,12 @@ async def send_message(
         )
     except ConversationNotFoundError:
         raise _not_found() from None
+    except ConversationBusyError:
+        raise ApiError(
+            409,
+            "CONVERSATION_BUSY",
+            "A reply is still being written in this conversation. Send again when it finishes.",
+        ) from None
     except AiError as err:
         raise err.to_api_error() from None
     except SequenceConflictError:

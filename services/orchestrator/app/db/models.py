@@ -3,7 +3,8 @@
 Every table has created_at and updated_at. audit_records and memory_records are
 append-only: database triggers reject UPDATE, DELETE and TRUNCATE (see migrations).
 
-Conversations are soft-deleted (deleted_at); a trigger rejects UPDATE on messages.
+Conversations are soft-deleted (deleted_at) and carry a turn lease (active_turn_id,
+turn_lease_expires_at) so one chat turn runs at a time; a trigger rejects UPDATE on messages.
 
 TODO(phase-4): jobs.
 """
@@ -262,6 +263,8 @@ class ConversationRow(TimestampMixin, Base):
     principal_id: Mapped[str] = mapped_column(String(128), ForeignKey("principals.principal_id"))
     title: Mapped[str] = mapped_column(String(200))
     deleted_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+    active_turn_id: Mapped[str | None] = mapped_column(String(128))
+    turn_lease_expires_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 
 class MessageRow(TimestampMixin, Base):

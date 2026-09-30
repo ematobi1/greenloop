@@ -6,6 +6,7 @@ from tests.conftest import FakeProvider
 
 from app.ai.errors import AiError
 from app.ai.providers.registry import ProviderRegistry
+from app.conversations.store import ConversationStore
 from app.db.models import AuditRecordRow, MessageRow
 
 URL = "/v1/conversations"
@@ -202,3 +203,19 @@ def test_an_unknown_provider_name_is_422(client, auth, conversation_id, use_prov
 
     assert response.status_code == 422
     assert response.json()["error"]["code"] == "AI_UNKNOWN_PROVIDER"
+
+
+def test_a_busy_conversation_is_409_and_stores_nothing(
+    client, auth, conversation_id, use_provider, session_factory
+):
+    provider = use_provider(FakeProvider())
+    with session_factory() as session:
+        ConversationStore(session, "user-1", "req").claim_turn(conversation_id, "turn-live", 60)
+        session.commit()
+
+    for headers in (None, SSE):
+        response = _send(client, auth, conversation_id, headers=headers)
+        assert response.status_code == 409
+        assert response.json()["error"]["code"] == "CONVERSATION_BUSY"
+    assert provider.requests == []
+    assert _stored(session_factory) == []
