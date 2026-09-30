@@ -6,6 +6,7 @@ Paid: it calls the configured provider (ANTHROPIC_API_KEY from the root .env by
 default). Run from services/orchestrator so the service's settings and deps apply:
 
     python ../../evals/chat_behavior.py [--provider NAME] [--limit N] [--out report.jsonl]
+    python ../../evals/chat_behavior.py --rescore report.jsonl   # free: saved replies
 
 Pass rule: every case in SAFETY_CATEGORIES passes, and at least PASS_THRESHOLD of all
 cases pass. Exit code 0 on pass, 1 on fail, 2 when no provider is configured.
@@ -179,8 +180,42 @@ async def run_all(
     return list(await asyncio.gather(*(bounded(case) for case in cases)))
 
 
-def _summary(results: list[CaseResult], outcome: Verdict, provider: ModelProvider) -> str:
-    lines = [f"provider={provider.config.name} model={provider.config.model}"]
+def rescore(cases: list[Case], report: Path) -> tuple[list[CaseResult], list[str]]:
+    """Score saved replies against the current checks, with no model calls.
+
+    Returns the rescored results and the ids of cases the report has no reply for.
+    A saved provider error stays a failure.
+    """
+    saved = {
+        row["id"]: row for row in map(json.loads, report.read_text(encoding="utf-8").splitlines())
+    }
+    results, missing = [], []
+    for case in cases:
+        row = saved.get(case.id)
+        if row is None:
+            missing.append(case.id)
+            continue
+        failures = (
+            [f"provider error {row['error']}"] if row.get("error") else score(case, row["reply"])
+        )
+        results.append(
+            CaseResult(
+                id=case.id,
+                category=case.category,
+                passed=not failures,
+                failures=failures,
+                reply=row["reply"],
+                error=row.get("error"),
+                input_tokens=row.get("input_tokens", 0),
+                output_tokens=row.get("output_tokens", 0),
+                latency_ms=row.get("latency_ms", 0),
+            )
+        )
+    return results, missing
+
+
+def _summary(results: list[CaseResult], outcome: Verdict, label: str) -> str:
+    lines = [label]
     for category in sorted({r.category for r in results}):
         group = [r for r in results if r.category == category]
         lines.append(f"  {category:<18} {sum(r.passed for r in group)}/{len(group)}")
@@ -205,7 +240,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--provider", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--out", type=Path, default=None)
+    parser.add_argument("--rescore", type=Path, default=None, help="saved report; no model calls")
     args = parser.parse_args(argv)
+
+    if args.rescore:
+        results, missing = rescore(load_cases(), args.rescore)
+        outcome = verdict(results)
+        print(_summary(results, outcome, f"rescored {args.rescore.name} (no model calls)"))
+        if missing:
+            print(f"  not in report, not scored: {', '.join(missing)}")
+        return 0 if outcome.passed else 1
 
     settings = get_settings()
     try:
@@ -225,7 +269,8 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(
             "".join(json.dumps(asdict(r)) + "\n" for r in results), encoding="utf-8"
         )
-    print(_summary(results, outcome, provider))
+    label = f"provider={provider.config.name} model={provider.config.model}"
+    print(_summary(results, outcome, label))
     return 0 if outcome.passed else 1
 
 
