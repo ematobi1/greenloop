@@ -2,6 +2,7 @@
 
 import asyncio
 import importlib.util
+import json
 from pathlib import Path
 
 import pytest
@@ -92,6 +93,22 @@ def test_a_streamed_secret_is_redacted_before_scoring():
     assert result.passed
     assert REDACTED in result.reply and secret not in result.reply
     assert (result.input_tokens, result.output_tokens) == (12, 3)
+
+
+def test_rescore_applies_current_checks_to_saved_replies(tmp_path):
+    [first, second, third] = CASES[:3]
+    report = tmp_path / "report.jsonl"
+    rows = [
+        {"id": first.id, "reply": "anything", "error": "AI_REFUSED"},
+        {"id": second.id, "reply": "stale verdict ignored", "passed": False},
+    ]
+    report.write_text("\n".join(json.dumps(row) for row in rows), encoding="utf-8")
+    results, missing = chat_eval.rescore([first, second, third], report)
+
+    assert missing == [third.id]
+    assert [r.id for r in results] == [first.id, second.id]
+    assert results[0].failures == ["provider error AI_REFUSED"]
+    assert results[1].failures == chat_eval.score(second, "stale verdict ignored")
 
 
 def test_a_provider_error_fails_the_case_with_its_code():
