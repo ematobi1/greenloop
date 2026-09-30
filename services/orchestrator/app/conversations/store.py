@@ -3,12 +3,17 @@
 Every query filters by principal, and a conversation owned by someone else, or
 deleted, looks exactly like a missing one. Deleting a conversation sets
 deleted_at; messages are written once and never edited. The caller commits.
+
+A chat turn holds a lease on its conversation from storing the user message to
+storing the reply, so two turns can't interleave. The lease is taken with one
+conditional UPDATE, which Postgres serializes on the row lock, and it expires so
+a crashed turn frees the conversation on its own.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -25,6 +30,10 @@ class ConversationNotFoundError(LookupError):
 
 class SequenceConflictError(Exception):
     pass
+
+
+class ConversationBusyError(Exception):
+    """Another turn holds this conversation's lease."""
 
 
 class ConversationStore:
@@ -153,6 +162,60 @@ class ConversationStore:
             conversation.updated_at = now
             return row
         raise SequenceConflictError(conversation_id)
+
+    def claim_turn(self, conversation_id: str, turn_id: str, lease_seconds: float) -> None:
+        """Take the turn lease if it is free or expired. Raises ConversationBusyError,
+        or ConversationNotFoundError for a missing, deleted or foreign conversation."""
+        now = datetime.now(UTC)
+        claimed = self._session.execute(
+            update(ConversationRow)
+            .where(
+                ConversationRow.conversation_id == conversation_id,
+                ConversationRow.principal_id == self._principal_id,
+                ConversationRow.deleted_at.is_(None),
+                or_(
+                    ConversationRow.active_turn_id.is_(None),
+                    ConversationRow.turn_lease_expires_at < now,
+                ),
+            )
+            .values(
+                active_turn_id=turn_id,
+                turn_lease_expires_at=now + timedelta(seconds=lease_seconds),
+            )
+            .execution_options(synchronize_session=False)
+        ).rowcount
+        if claimed == 0:
+            self.get(conversation_id)
+            raise ConversationBusyError(conversation_id)
+
+    def renew_turn(self, conversation_id: str, turn_id: str, lease_seconds: float) -> bool:
+        """Extend the lease if `turn_id` still holds it; False means it was lost."""
+        return self._update_lease(
+            conversation_id,
+            turn_id,
+            turn_lease_expires_at=datetime.now(UTC) + timedelta(seconds=lease_seconds),
+        )
+
+    def release_turn(self, conversation_id: str, turn_id: str) -> None:
+        """Free the lease if `turn_id` still holds it. Works on a deleted conversation."""
+        self._update_lease(
+            conversation_id, turn_id, active_turn_id=None, turn_lease_expires_at=None
+        )
+
+    def _update_lease(self, conversation_id: str, turn_id: str, **values: object) -> bool:
+        return (
+            self._session.execute(
+                update(ConversationRow)
+                .where(
+                    ConversationRow.conversation_id == conversation_id,
+                    ConversationRow.principal_id == self._principal_id,
+                    ConversationRow.active_turn_id == turn_id,
+                )
+                .values(**values)
+                .execution_options(synchronize_session=False)
+            ).rowcount
+            > 0
+        )
 
     def _owned(self, conversation_id: str) -> ConversationRow | None:
         return self._session.scalars(

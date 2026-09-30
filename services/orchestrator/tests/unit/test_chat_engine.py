@@ -4,13 +4,18 @@ import pytest
 from sqlalchemy import select
 from tests.conftest import FakeProvider
 
+from app.ai import engine as engine_module
 from app.ai.engine import ChatEngine, Delta, Failed, Finished
 from app.ai.errors import AiError
 from app.ai.providers.registry import ProviderRegistry
-from app.conversations.store import ConversationNotFoundError, ConversationStore
+from app.conversations.store import (
+    ConversationBusyError,
+    ConversationNotFoundError,
+    ConversationStore,
+)
 from app.core.config import Settings
 from app.core.redaction import REDACTED, Redactor
-from app.db.models import AuditRecordRow, MessageRow, PrincipalRow
+from app.db.models import AuditRecordRow, ConversationRow, MessageRow, PrincipalRow
 from app.memory.store import MemoryStore
 
 SECRET = "sk-ant-api03-synthetic-secret-value-0000000000"
@@ -197,3 +202,102 @@ def test_run_to_completion_raises_the_ai_error(session_factory, conversation_id)
     with pytest.raises(AiError) as err:
         asyncio.run(engine.run_to_completion(turn))
     assert err.value.code == "rejected"
+
+
+def _lease_holder(session_factory, conversation_id):
+    with session_factory() as session:
+        return session.get(ConversationRow, conversation_id).active_turn_id
+
+
+def test_a_second_turn_is_busy_until_the_first_finishes(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider(["ok"]))
+    first = engine.prepare("user-1", conversation_id, "one", "req")
+    with pytest.raises(ConversationBusyError):
+        engine.prepare("user-1", conversation_id, "two", "req")
+    assert [m.content for m in _messages(session_factory, conversation_id)] == ["one"]
+
+    _events(engine, first)
+    assert _lease_holder(session_factory, conversation_id) is None
+    _events(engine, engine.prepare("user-1", conversation_id, "two", "req"))
+    assert [(m.role, m.content) for m in _messages(session_factory, conversation_id)] == [
+        ("user", "one"),
+        ("assistant", "ok"),
+        ("user", "two"),
+        ("assistant", "ok"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "provider",
+    [
+        FakeProvider(["partial"], error=AiError("unavailable"), error_after=1),
+        FakeProvider(hang=True),
+        FakeProvider([]),
+    ],
+    ids=["provider-error", "timeout", "empty-reply"],
+)
+def test_a_failed_turn_releases_the_lease(session_factory, conversation_id, provider):
+    engine = _engine(session_factory, provider)
+    events = _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
+    assert isinstance(events[-1], Failed)
+    assert _lease_holder(session_factory, conversation_id) is None
+
+
+def test_a_client_disconnect_releases_the_lease(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider(["one ", "two"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+
+    async def read_one_then_disconnect():
+        stream = engine.run(turn)
+        await stream.__anext__()
+        await stream.aclose()
+
+    asyncio.run(read_one_then_disconnect())
+    assert _lease_holder(session_factory, conversation_id) is None
+
+
+def test_a_request_too_large_keeps_no_lease(session_factory, conversation_id):
+    tight = _engine(
+        session_factory,
+        FakeProvider(),
+        ai_context_token_limit=4000,
+        ai_max_output_tokens=3990,
+    )
+    with pytest.raises(AiError, match="too large"):
+        tight.prepare("user-1", conversation_id, "Hi", "req")
+    assert _lease_holder(session_factory, conversation_id) is None
+    assert _messages(session_factory, conversation_id) == []
+
+
+def test_the_lease_is_renewed_while_the_reply_streams(
+    session_factory, conversation_id, monkeypatch
+):
+    monkeypatch.setattr(engine_module, "RENEW_INTERVAL_SECONDS", 0)
+    renewals = []
+    real_renew = ConversationStore.renew_turn
+
+    def counting_renew(self, *args):
+        renewals.append(real_renew(self, *args))
+        return renewals[-1]
+
+    monkeypatch.setattr(ConversationStore, "renew_turn", counting_renew)
+    engine = _engine(session_factory, FakeProvider(["a", "b", "c"]))
+    _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
+    assert len(renewals) >= 3
+    assert all(renewals)
+
+
+def test_a_lost_lease_still_stores_the_reply_and_frees_nothing_it_does_not_hold(
+    session_factory, conversation_id, monkeypatch
+):
+    monkeypatch.setattr(engine_module, "RENEW_INTERVAL_SECONDS", 0)
+    engine = _engine(session_factory, FakeProvider(["late ", "reply"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+    with session_factory() as session:
+        session.get(ConversationRow, conversation_id).active_turn_id = "turn-taken-over"
+        session.commit()
+
+    events = _events(engine, turn)
+    assert isinstance(events[-1], Finished)
+    assert _messages(session_factory, conversation_id)[-1].content == "late reply"
+    assert _lease_holder(session_factory, conversation_id) == "turn-taken-over"

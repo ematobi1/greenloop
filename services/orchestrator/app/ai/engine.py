@@ -10,10 +10,18 @@ long but steady answer is never cut off while a stalled one is. If the client
 disconnects or the provider fails mid-stream, the text so far is kept as an
 incomplete message. The engine never sees raw memory records, only the
 MemoryContext.
+
+prepare() takes the conversation's turn lease before anything else and _finish()
+releases it with the reply, so turns can't interleave. The lease lasts the idle
+timeout plus LEASE_MARGIN_SECONDS and is renewed at least every
+RENEW_INTERVAL_SECONDS while events arrive, so it always outlives the idle timeout
+of a live stream. A turn that never reaches _finish (process crash, a stream the
+client dropped before it started) frees the conversation when the lease expires.
 """
 
 import asyncio
 import time
+import uuid
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 
@@ -35,12 +43,17 @@ from greenloop_contracts import AuditOutcome, AuditRecord
 
 logger = structlog.get_logger(__name__)
 
+LEASE_MARGIN_SECONDS = 30.0
+RENEW_INTERVAL_SECONDS = 15.0
+
 
 @dataclass(frozen=True)
 class PreparedTurn:
     principal_id: str
     conversation_id: str
     correlation_id: str
+    turn_id: str
+    lease_started: float
     provider: ModelProvider
     request: GenerationRequest
     user_message: MessageRow
@@ -87,12 +100,16 @@ class ChatEngine:
         correlation_id: str,
         provider_name: str | None = None,
     ) -> PreparedTurn:
-        """Build the request and store the user message. Raises AiError or
-        ConversationNotFoundError; nothing is stored when either is raised."""
+        """Take the turn lease, build the request and store the user message. Raises
+        AiError, ConversationNotFoundError or ConversationBusyError; nothing is stored
+        and no lease is kept when any of them is raised."""
         provider = self._registry.get(provider_name)
         settings = self._settings
+        turn_id = f"turn-{uuid.uuid4().hex}"
         with self._session_factory() as session:
             store = ConversationStore(session, principal_id, correlation_id)
+            store.claim_turn(conversation_id, turn_id, self._lease_seconds)
+            lease_started = time.monotonic()
             history = [
                 Message(role=row.role, content=row.content)
                 for row in store.history(conversation_id, settings.ai_history_message_limit)
@@ -123,6 +140,8 @@ class ChatEngine:
             principal_id=principal_id,
             conversation_id=conversation_id,
             correlation_id=correlation_id,
+            turn_id=turn_id,
+            lease_started=lease_started,
             provider=provider,
             request=request,
             user_message=user_message,
@@ -136,11 +155,15 @@ class ChatEngine:
         done = Done()
         events = turn.provider.stream(turn.request).__aiter__()
         failure: AiError | None = None
+        last_renewal = turn.lease_started
         try:
             while True:
                 event = await self._next(events)
                 if event is None:
                     break
+                if time.monotonic() - last_renewal >= RENEW_INTERVAL_SECONDS:
+                    last_renewal = time.monotonic()
+                    await asyncio.to_thread(self._renew, turn)
                 if isinstance(event, Done):
                     done = event
                     break
@@ -191,6 +214,24 @@ class ChatEngine:
         except TimeoutError as err:
             raise AiError("timeout") from err
 
+    @property
+    def _lease_seconds(self) -> float:
+        return self._settings.ai_timeout_seconds + LEASE_MARGIN_SECONDS
+
+    def _renew(self, turn: PreparedTurn) -> None:
+        """Extend the lease. A failure is logged, not raised: losing the lease risks an
+        interleaved transcript, which is better than cutting off a live reply."""
+        try:
+            with self._session_factory() as session:
+                store = ConversationStore(session, turn.principal_id, turn.correlation_id)
+                renewed = store.renew_turn(turn.conversation_id, turn.turn_id, self._lease_seconds)
+                session.commit()
+        except Exception:
+            logger.warning("chat_turn_lease_renew_failed", exc_info=True)
+            return
+        if not renewed:
+            logger.warning("chat_turn_lease_lost", conversation_id=turn.conversation_id)
+
     def _finish(
         self,
         turn: PreparedTurn,
@@ -199,13 +240,16 @@ class ChatEngine:
         started: float,
         failure: AiError | None,
     ) -> MessageRow | None:
-        """Store the reply (partial text as incomplete), audit the turn and log a trace."""
+        """Store the reply (partial text as incomplete), release the turn lease, audit
+        the turn and log a trace, all in one transaction."""
         config = turn.provider.config
         latency_ms = round((time.perf_counter() - started) * 1000)
         with self._session_factory() as session:
+            store = ConversationStore(session, turn.principal_id, turn.correlation_id)
+            store.release_turn(turn.conversation_id, turn.turn_id)
             message = None
             if text.strip():
-                message = ConversationStore(session, turn.principal_id, turn.correlation_id).append(
+                message = store.append(
                     turn.conversation_id,
                     MessageRole.ASSISTANT,
                     text,
