@@ -37,7 +37,12 @@ class Settings(BaseSettings):
     broker_url: str | None = None
 
     anthropic_api_key: SecretStr | None = None
-    anthropic_model: str = "claude-opus-5-5"
+    chat_model: str = Field(
+        default="claude-opus-5-5",
+        validation_alias="GREENLOOP_CHAT_MODEL",
+        max_length=128,
+        pattern=r"^[A-Za-z0-9._:/-]+$",
+    )
     anthropic_effort: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_model: str | None = None

@@ -42,7 +42,7 @@ def build_registry(settings: Settings) -> ProviderRegistry:
     providers: dict[str, ModelProvider] = {}
     if settings.anthropic_api_key and settings.anthropic_api_key.get_secret_value():
         providers["anthropic"] = AnthropicProvider(
-            config("anthropic", settings.anthropic_model),
+            config("anthropic", settings.chat_model),
             api_key=settings.anthropic_api_key,
             effort=settings.anthropic_effort,
         )
