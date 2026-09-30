@@ -284,6 +284,13 @@ def test_registry_registers_configured_providers():
     assert err.value.code == "unknown_provider"
 
 
+def test_registry_uses_the_configured_chat_model():
+    settings = Settings(
+        _env_file=None, anthropic_api_key="synthetic-key", GREENLOOP_CHAT_MODEL="claude-sonnet-5-5"
+    )
+    assert build_registry(settings).get().config.model == "claude-sonnet-5-5"
+
+
 def test_registry_default_falls_back_to_not_configured_when_missing():
     registry = build_registry(
         Settings(_env_file=None, ollama_model="llama3", ai_default_provider="anthropic")

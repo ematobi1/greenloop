@@ -14,6 +14,8 @@ ENV_VARS = (
     "ALLOWED_HOSTS",
     "CORS_ORIGINS",
     "GREENLOOP_ENV_FILE",
+    "GREENLOOP_CHAT_MODEL",
+    "ANTHROPIC_MODEL",
 )
 
 
@@ -28,7 +30,24 @@ def test_defaults_when_environment_is_empty():
     assert settings.environment == "dev"
     assert settings.database_url is None
     assert settings.anthropic_api_key is None
-    assert settings.anthropic_model == "claude-opus-5-5"
+    assert settings.chat_model == "claude-opus-5-5"
+
+
+def test_greenloop_chat_model_sets_the_chat_model(monkeypatch):
+    monkeypatch.setenv("GREENLOOP_CHAT_MODEL", "claude-sonnet-5-5")
+    assert Settings(_env_file=None).chat_model == "claude-sonnet-5-5"
+
+
+def test_anthropic_model_is_no_longer_read(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+    assert Settings(_env_file=None).chat_model == "claude-opus-5-5"
+
+
+@pytest.mark.parametrize("value", ["claude opus", "model;rm", "x" * 129])
+def test_rejects_malformed_chat_model(monkeypatch, value):
+    monkeypatch.setenv("GREENLOOP_CHAT_MODEL", value)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
 
 
 def test_loads_values_from_environment(monkeypatch):
