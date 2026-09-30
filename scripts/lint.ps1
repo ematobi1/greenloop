@@ -16,8 +16,8 @@ function Invoke-Check([string]$Name, [scriptblock]$Command) {
 
 Push-Location $root
 try {
-    Invoke-Check 'ruff check' { & $ruff check packages services }
-    Invoke-Check 'ruff format' { & $ruff format --check packages services }
+    Invoke-Check 'ruff check' { & $ruff check packages services evals }
+    Invoke-Check 'ruff format' { & $ruff format --check packages services evals }
 
     Write-Host '== powershell syntax'
     foreach ($script in Get-ChildItem (Join-Path $root 'scripts') -Recurse -Filter '*.ps1') {
