@@ -389,3 +389,26 @@ def test_registry_default_falls_back_to_not_configured_when_missing():
         registry.get()
     assert err.value.code == "not_configured"
     assert registry.get("ollama").config.name == "ollama"
+
+
+def _stream_then_error(error_type: str) -> bytes:
+    """Text starts streaming, then the API sends a mid-stream `error` event."""
+    started = _message_stream(["partial"]).split(b"event: content_block_stop")[0]
+    error = {"type": "error", "error": {"type": error_type, "message": "synthetic"}}
+    return started + _sse(("error", error))
+
+
+@pytest.mark.parametrize(
+    ("error_type", "code"),
+    [
+        ("overloaded_error", "unavailable"),
+        ("api_error", "unavailable"),
+        ("rate_limit_error", "unavailable"),
+        ("timeout_error", "timeout"),
+        ("invalid_request_error", "rejected"),
+    ],
+)
+def test_anthropic_mid_stream_error_events_map_by_error_type(error_type, code):
+    with pytest.raises(AiError) as err:
+        _collect(_anthropic(_stream_response(_stream_then_error(error_type))))
+    assert err.value.code == code
