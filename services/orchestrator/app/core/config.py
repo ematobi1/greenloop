@@ -51,7 +51,8 @@ class Settings(BaseSettings):
     ai_default_provider: Literal["anthropic", "ollama"] = "anthropic"
     ai_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
     ai_max_retries: int = Field(default=2, ge=0, le=5)
-    ai_max_output_tokens: int = Field(default=16000, ge=256, le=128000)
+    # Thinking counts against this cap; 16000 cut replies off at effort medium.
+    ai_max_output_tokens: int = Field(default=32000, ge=256, le=128000)
     ai_context_token_limit: int = Field(default=150000, ge=4000)
     ai_history_message_limit: int = Field(default=40, ge=0, le=500)
     ai_max_message_chars: int = Field(default=20000, ge=1, le=200000)
