@@ -138,3 +138,43 @@ def test_structlog_processor_redacts_nested_values():
 def test_structlog_processor_leaves_non_strings_alone():
     processor = redact_event_dict(Redactor())
     assert processor(None, "info", {"status": 200, "ok": True}) == {"status": 200, "ok": True}
+
+
+class TestCurrentBehaviorPinned:
+    """Exact outputs that must not change when new redaction rules are added."""
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("password=hunter2abc", "password=[REDACTED]"),
+            ("api_key: abcdef123456", "api_key: [REDACTED]"),
+            ('password="hunter2abc"', 'password="[REDACTED]"'),
+            ("client_secret = s3cr3tvalue", "client_secret = [REDACTED]"),
+            ("Authorization: Bearer abc123def456ghi789", "Authorization: Bearer [REDACTED]"),
+            ("password=abc", "password=abc"),
+            ("the token is valid", "the token is valid"),
+        ],
+    )
+    def test_labelled_values(self, text, expected):
+        assert Redactor().redact(text) == expected
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            '{"name": "Terry", "token_count": 12}',
+            '{"max_tokens": 16000, "model": "claude-opus-5-5"}',
+            '{"secret_santa": true}',
+            "Tokens: 1200 input, 300 output.",
+        ],
+    )
+    def test_harmless_text_and_json_are_unchanged(self, text):
+        assert Redactor().redact(text) == text
+
+    def test_a_known_secret_without_a_recognized_shape_is_redacted(self):
+        secret = "plain-known-value-42"
+        redacted, count = Redactor([secret]).redact_counted(f"a {secret} b {secret}")
+        assert (redacted, count) == (f"a {REDACTED} b {REDACTED}", 2)
+
+    def test_redaction_counts_each_hit(self):
+        text = "password=hunter2abc and api_key: abcdef123456"
+        assert Redactor().redact_counted(text)[1] == 2
