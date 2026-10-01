@@ -32,6 +32,12 @@ from app.ai.providers.base import (
 logger = structlog.get_logger(__name__)
 
 SDK_HELPER_EVENTS = frozenset({"text", "thinking", "signature", "input_json", "citation"})
+TRANSIENT_ERROR_TYPES = {
+    "overloaded_error": "unavailable",
+    "api_error": "unavailable",
+    "rate_limit_error": "unavailable",
+    "timeout_error": "timeout",
+}
 
 
 class AnthropicProvider:
@@ -85,10 +91,14 @@ class AnthropicProvider:
             _log_status("anthropic_unavailable", err)
             raise AiError("unavailable") from err
         except anthropic.APIStatusError as err:
-            # 529 overloaded and other 5xx subclasses are transient, whatever their class.
-            if err.status_code >= 500:
+            # A mid-stream `error` event arrives with the stream's HTTP 200 status, so
+            # map on the API error type first; 529 and other 5xx are transient anyway.
+            mapped = TRANSIENT_ERROR_TYPES.get(err.type or "")
+            if mapped is None and err.status_code >= 500:
+                mapped = "unavailable"
+            if mapped is not None:
                 _log_status("anthropic_unavailable", err)
-                raise AiError("unavailable") from err
+                raise AiError(mapped) from err
             _log_status("anthropic_rejected_request", err)
             raise AiError("rejected") from err
 
