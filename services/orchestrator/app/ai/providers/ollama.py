@@ -110,11 +110,13 @@ def _parse_chunk(line: str) -> list[StreamEvent]:
     if content:
         events.append(TextDelta(content))
     if chunk.get("done"):
+        stop_reason = str(chunk.get("done_reason", "stop"))
         events.append(
             Done(
-                stop_reason=str(chunk.get("done_reason", "stop")),
+                stop_reason=stop_reason,
                 input_tokens=int(chunk.get("prompt_eval_count", 0)),
                 output_tokens=int(chunk.get("eval_count", 0)),
+                truncated=stop_reason == "length",
             )
         )
     return events

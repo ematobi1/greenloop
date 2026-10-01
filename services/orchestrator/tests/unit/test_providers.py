@@ -10,8 +10,15 @@ from pydantic import SecretStr
 
 from app.ai.errors import AiError
 from app.ai.providers.anthropic import AnthropicProvider
-from app.ai.providers.base import Done, GenerationRequest, Message, ProviderConfig, TextDelta
-from app.ai.providers.ollama import OllamaProvider, validate_loopback_url
+from app.ai.providers.base import (
+    Activity,
+    Done,
+    GenerationRequest,
+    Message,
+    ProviderConfig,
+    TextDelta,
+)
+from app.ai.providers.ollama import OllamaProvider, _parse_chunk, validate_loopback_url
 from app.ai.providers.registry import build_registry
 from app.core.config import Settings
 
@@ -32,7 +39,11 @@ def _sse(*events: tuple[str, dict]) -> bytes:
     return "".join(f"event: {name}\ndata: {json.dumps(data)}\n\n" for name, data in events).encode()
 
 
-def _message_stream(texts: list[str], stop_reason: str = "end_turn") -> bytes:
+def _message_stream(
+    texts: list[str], stop_reason: str = "end_turn", thinking: list[str] = ()
+) -> bytes:
+    """A Messages SSE stream; `thinking` adds a summarized thinking block before the text."""
+    text_index = 1 if thinking else 0
     events = [
         (
             "message_start",
@@ -50,24 +61,63 @@ def _message_stream(texts: list[str], stop_reason: str = "end_turn") -> bytes:
                 },
             },
         ),
+    ]
+    if thinking:
+        events.append(
+            (
+                "content_block_start",
+                {
+                    "type": "content_block_start",
+                    "index": 0,
+                    "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+                },
+            )
+        )
+        events += [
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "thinking_delta", "thinking": part},
+                },
+            )
+            for part in thinking
+        ]
+        events += [
+            (
+                "content_block_delta",
+                {
+                    "type": "content_block_delta",
+                    "index": 0,
+                    "delta": {"type": "signature_delta", "signature": "sig-synthetic"},
+                },
+            ),
+            ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ]
+    events.append(
         (
             "content_block_start",
             {
                 "type": "content_block_start",
-                "index": 0,
+                "index": text_index,
                 "content_block": {"type": "text", "text": ""},
             },
-        ),
-    ]
+        )
+    )
     events += [
         (
             "content_block_delta",
-            {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": t}},
+            {
+                "type": "content_block_delta",
+                "index": text_index,
+                "delta": {"type": "text_delta", "text": t},
+            },
         )
         for t in texts
     ]
     events += [
-        ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+        ("content_block_stop", {"type": "content_block_stop", "index": text_index}),
         (
             "message_delta",
             {
@@ -105,7 +155,8 @@ def test_anthropic_streams_text_then_done_with_usage_and_request_id():
         )
 
     events = _collect(_anthropic(handler))
-    assert events[:-1] == [TextDelta("Hel"), TextDelta("lo")]
+    assert [e for e in events if isinstance(e, TextDelta)] == [TextDelta("Hel"), TextDelta("lo")]
+    assert set(map(type, events[:-1])) <= {TextDelta, Activity}
     assert events[-1] == Done(
         stop_reason="end_turn", input_tokens=42, output_tokens=7, request_id="req_synthetic_1"
     )
@@ -117,8 +168,47 @@ def test_anthropic_streams_text_then_done_with_usage_and_request_id():
     assert body["messages"] == [{"role": "user", "content": "hello"}]
     assert body["output_config"] == {"effort": "medium"}
     assert body["stream"] is True
-    assert "thinking" not in body
+    assert body["thinking"] == {"type": "adaptive", "display": "summarized"}
     assert "temperature" not in body
+
+
+def _stream_response(content: bytes):
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(
+            200,
+            headers={"content-type": "text/event-stream", "request-id": "req_synthetic_2"},
+            content=content,
+        )
+
+    return handler
+
+
+def test_anthropic_thinking_is_activity_and_its_text_never_leaks():
+    secret_thought = "THINKING-SUMMARY-MUST-NOT-LEAK"
+    events = _collect(
+        _anthropic(_stream_response(_message_stream(["answer"], thinking=[secret_thought, "more"])))
+    )
+    texts = [e.text for e in events if isinstance(e, TextDelta)]
+
+    assert texts == ["answer"]
+    first_text = next(i for i, e in enumerate(events) if isinstance(e, TextDelta))
+    assert sum(isinstance(e, Activity) for e in events[:first_text]) >= 4
+    assert secret_thought not in repr(events)
+
+
+def test_anthropic_max_tokens_marks_the_reply_truncated():
+    events = _collect(
+        _anthropic(_stream_response(_message_stream(["cut"], stop_reason="max_tokens")))
+    )
+    assert events[-1].truncated is True
+    assert events[-1].stop_reason == "max_tokens"
+
+
+def test_ollama_length_marks_the_reply_truncated():
+    [done] = _parse_chunk(json.dumps({"done": True, "done_reason": "length", "eval_count": 5}))
+    assert done.truncated is True
+    [normal] = _parse_chunk(json.dumps({"done": True, "done_reason": "stop"}))
+    assert normal.truncated is False
 
 
 def test_anthropic_refusal_is_an_error_not_an_empty_answer():

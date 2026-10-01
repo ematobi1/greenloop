@@ -5,10 +5,12 @@ request and stores the user message, all before any model call. run() streams th
 reply through a StreamRedactor, so a secret split across chunks is still caught,
 then stores it and audits the turn with provider, model, token usage and latency.
 
-Streams are bounded by an idle timeout between events, not a total deadline, so a
-long but steady answer is never cut off while a stalled one is. If the client
-disconnects or the provider fails mid-stream, the text so far is kept as an
-incomplete message. The engine never sees raw memory records, only the
+Streams are bounded by an idle timeout between provider events (text or Activity,
+which providers emit while the model thinks), not a total deadline, so a long but
+steady answer is never cut off while a stalled one is. If the client disconnects,
+the provider fails mid-stream, or the reply hits the output-token limit
+(AI_TRUNCATED), the text so far is kept as an incomplete message, which later
+history leaves out. The engine never sees raw memory records, only the
 MemoryContext.
 
 prepare() takes the conversation's turn lease before anything else and _finish()
@@ -195,6 +197,8 @@ class ChatEngine:
 
         emitted.append(redacting.flush())
         text = "".join(emitted)
+        if failure is None and done.truncated:
+            failure = AiError("truncated")
         if failure is None and not text.strip():
             failure = AiError("invalid_response")
         message, abandoned = await asyncio.to_thread(
