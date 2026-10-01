@@ -140,7 +140,7 @@ def test_incomplete_replies_are_left_out_of_later_history(session_factory, conve
     provider = FakeProvider(["ok"])
     engine = _engine(session_factory, provider)
     _events(engine, engine.prepare("user-1", conversation_id, "second", "req"))
-    assert [m.content for m in provider.requests[0].messages] == ["first", "second"]
+    assert [m.content for m in provider.requests[0].messages] == ["second"]
 
 
 def test_an_empty_reply_is_invalid_and_stores_nothing(session_factory, conversation_id):
@@ -381,7 +381,7 @@ def test_a_truncated_reply_is_incomplete_and_left_out_of_history(session_factory
     provider = FakeProvider(["ok"])
     following = _engine(session_factory, provider)
     _events(following, following.prepare("user-1", conversation_id, "next", "req"))
-    assert [m.content for m in provider.requests[0].messages] == ["long please", "next"]
+    assert [m.content for m in provider.requests[0].messages] == ["next"]
 
 
 def test_a_truncated_empty_reply_says_truncated_not_invalid(session_factory, conversation_id):
@@ -470,3 +470,13 @@ def test_finish_never_raises_even_when_the_fallback_audit_fails(
     events = _events(engine, turn)
     assert isinstance(events[-1], Failed)
     assert _audits(session_factory) == []
+
+
+def test_a_refused_message_does_not_poison_later_turns(session_factory, conversation_id):
+    refusing = _engine(session_factory, FakeProvider(error=AiError("refused"), error_after=0))
+    _events(refusing, refusing.prepare("user-1", conversation_id, "trigger text", "req"))
+
+    provider = FakeProvider(["fine"])
+    engine = _engine(session_factory, provider)
+    _events(engine, engine.prepare("user-1", conversation_id, "unrelated question", "req"))
+    assert [m.content for m in provider.requests[0].messages] == ["unrelated question"]

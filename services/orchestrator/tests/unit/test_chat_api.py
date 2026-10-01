@@ -336,3 +336,16 @@ def test_a_store_failure_over_sse_is_an_error_event_not_a_reset(
     monkeypatch.setattr(ConversationStore, "append", append)
     name, data = _events(_send(client, auth, conversation_id, headers=SSE))[-1]
     assert (name, data["code"]) == ("error", "AI_UNAVAILABLE")
+
+
+@pytest.mark.parametrize("content", ["   ", "\n\t "])
+def test_a_blank_message_is_422_and_stores_nothing(
+    client, auth, conversation_id, use_provider, session_factory, content
+):
+    provider = use_provider(FakeProvider())
+    response = _send(client, auth, conversation_id, content)
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_FAILED"
+    assert "content" in response.json()["error"]["fields"]
+    assert provider.requests == []
+    assert _stored(session_factory) == []

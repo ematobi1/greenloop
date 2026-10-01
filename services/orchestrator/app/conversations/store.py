@@ -12,6 +12,7 @@ a crashed turn frees the conversation on its own.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from itertools import pairwise
 
 from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
@@ -104,20 +105,33 @@ class ConversationStore:
         return list(rows), total or 0
 
     def history(self, conversation_id: str, limit: int) -> list[MessageRow]:
-        """The newest `limit` complete messages, oldest first. Incomplete replies are skipped."""
+        """The newest `limit` messages from answered turns, oldest first.
+
+        A user message is kept only together with the complete assistant reply right
+        after it. A turn that was refused, rejected, failed, cut off or is still
+        pending never reaches a later prompt, so one bad message can't break every
+        turn after it, and history always alternates user/assistant. Turns don't
+        interleave (the turn lease), so a reply always directly follows its message.
+        """
         self.get(conversation_id)
         if limit == 0:
             return []
-        rows = self._session.scalars(
+        window = self._session.scalars(
             select(MessageRow)
-            .where(
-                MessageRow.conversation_id == conversation_id,
-                MessageRow.status == MessageStatus.COMPLETE.value,
-            )
+            .where(MessageRow.conversation_id == conversation_id)
             .order_by(MessageRow.sequence.desc())
-            .limit(limit)
+            .limit(limit * 2)
         ).all()
-        return list(reversed(rows))
+        window = list(reversed(window))
+        answered: list[MessageRow] = []
+        for message, reply in pairwise(window):
+            if (
+                message.role == MessageRole.USER.value
+                and reply.role == MessageRole.ASSISTANT.value
+                and reply.status == MessageStatus.COMPLETE.value
+            ):
+                answered += [message, reply]
+        return answered[-limit:]
 
     def append(
         self,
