@@ -301,3 +301,53 @@ def test_a_lost_lease_still_stores_the_reply_and_frees_nothing_it_does_not_hold(
     assert isinstance(events[-1], Finished)
     assert _messages(session_factory, conversation_id)[-1].content == "late reply"
     assert _lease_holder(session_factory, conversation_id) == "turn-taken-over"
+
+
+def _delete(session_factory, conversation_id):
+    with session_factory() as session:
+        ConversationStore(session, "user-1", "req-del").delete(conversation_id)
+        session.commit()
+
+
+def test_a_conversation_deleted_mid_turn_drops_the_reply_but_audits_it(
+    session_factory, conversation_id
+):
+    provider = FakeProvider(["never ", "stored"])
+    engine = _engine(session_factory, provider)
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+    _delete(session_factory, conversation_id)
+
+    events = _events(engine, turn)
+
+    assert isinstance(events[-1], engine_module.Abandoned)
+    assert [m.role for m in _messages(session_factory, conversation_id)] == ["user"]
+    [audit] = _audits(session_factory)
+    assert audit.outcome == "failed"
+    assert audit.details["error"] == "CONVERSATION_DELETED"
+    assert audit.details["assistant_message_id"] is None
+    assert audit.details["output_tokens"] == 3
+
+
+def test_run_to_completion_reports_a_deleted_conversation_as_not_found(
+    session_factory, conversation_id
+):
+    engine = _engine(session_factory, FakeProvider(["x"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+    _delete(session_factory, conversation_id)
+    with pytest.raises(ConversationNotFoundError):
+        asyncio.run(engine.run_to_completion(turn))
+    assert _audits(session_factory)[0].details["error"] == "CONVERSATION_DELETED"
+
+
+def test_a_disconnect_after_deletion_does_not_raise_from_cleanup(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider(["one ", "two"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+    _delete(session_factory, conversation_id)
+
+    async def read_one_then_disconnect():
+        stream = engine.run(turn)
+        await stream.__anext__()
+        await stream.aclose()
+
+    asyncio.run(read_one_then_disconnect())
+    assert _audits(session_factory)[0].details["error"] == "CONVERSATION_DELETED"

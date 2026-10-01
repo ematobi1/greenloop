@@ -5,7 +5,9 @@ whole reply) or, when the client sends `Accept: text/event-stream`, as SSE:
 `message` (the stored user message), `delta` events, then `done` (the stored reply)
 or `error` (a safe code and message, plus any partial reply that was kept). While a
 turn is in flight, another message to the same conversation gets 409
-CONVERSATION_BUSY and is not stored.
+CONVERSATION_BUSY and is not stored. If the conversation is deleted mid-turn, the
+reply is discarded and the client gets CONVERSATION_NOT_FOUND (404, or an SSE
+`error` event).
 """
 
 import asyncio
@@ -19,7 +21,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
 from sqlalchemy.orm import Session
 
-from app.ai.engine import ChatEngine, Delta, Failed, Finished, PreparedTurn
+from app.ai.engine import Abandoned, ChatEngine, Delta, Failed, Finished, PreparedTurn
 from app.ai.errors import AiError
 from app.api.v1.pagination import Limit, Offset, PageMeta
 from app.conversations.store import (
@@ -216,6 +218,8 @@ async def send_message(
         )
     try:
         reply = await engine.run_to_completion(turn)
+    except ConversationNotFoundError:
+        raise _not_found() from None
     except AiError as err:
         raise err.to_api_error() from None
     return TurnResult(
@@ -249,6 +253,12 @@ async def _event_stream(engine: ChatEngine, turn: PreparedTurn) -> AsyncIterator
                         "message": event.error.public_message,
                         "partial_message": _message_json(event.partial_message),
                     },
+                )
+            elif isinstance(event, Abandoned):
+                error = _not_found()
+                yield _sse(
+                    "error",
+                    {"code": error.code, "message": error.message, "partial_message": None},
                 )
     finally:
         await events.aclose()
