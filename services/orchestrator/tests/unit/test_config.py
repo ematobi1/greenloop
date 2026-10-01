@@ -190,3 +190,13 @@ def test_a_missing_root_env_is_harmless(tmp_path):
     package_file = tmp_path / "services" / "orchestrator" / "app" / "core" / "config.py"
     settings = Settings(_env_file=env_file_path(package_file))
     assert settings.database_url is None
+
+
+def test_output_cap_leaves_room_for_thinking_and_for_the_prompt():
+    """Opus 5.5 thinking counts against max_tokens: at effort medium a hard prompt used
+    all of 16k and was cut off mid-reply (paid smoke run, 2026-10-01). 32k doubles that
+    while the 150k context limit still leaves 118k for system prompt, history and memory."""
+    settings = Settings(_env_file=None)
+    assert settings.ai_max_output_tokens == 32000
+    assert settings.ai_context_token_limit == 150000
+    assert settings.ai_context_token_limit - settings.ai_max_output_tokens >= 100000
