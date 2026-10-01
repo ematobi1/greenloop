@@ -89,7 +89,7 @@ def test_messages_are_numbered_in_order_and_paginated(session):
     assert all(row.correlation_id == "req-1" for row in rows)
 
 
-def test_history_is_the_newest_complete_messages_oldest_first(session):
+def test_history_is_the_newest_answered_turns_oldest_first(session):
     store = _store(session)
     conversation_id = store.create("Chat").conversation_id
     store.append(conversation_id, MessageRole.USER, "one")
@@ -99,7 +99,7 @@ def test_history_is_the_newest_complete_messages_oldest_first(session):
     session.commit()
 
     assert [row.content for row in store.history(conversation_id, 2)] == ["two", "reply"]
-    assert [row.content for row in store.history(conversation_id, 10)] == ["one", "two", "reply"]
+    assert [row.content for row in store.history(conversation_id, 10)] == ["two", "reply"]
     assert store.history(conversation_id, 0) == []
 
 
@@ -186,3 +186,28 @@ def test_a_deleted_conversation_cannot_be_claimed(session):
     store.delete(conversation_id)
     with pytest.raises(ConversationNotFoundError):
         store.claim_turn(conversation_id, "turn-a", 60)
+
+
+def test_history_keeps_only_answered_turns(session):
+    store = _store(session)
+    conversation_id = store.create("Chat").conversation_id
+    store.append(conversation_id, MessageRole.USER, "answered")
+    store.append(conversation_id, MessageRole.ASSISTANT, "reply")
+    store.append(conversation_id, MessageRole.USER, "refused or rejected")
+    store.append(conversation_id, MessageRole.USER, "cut off")
+    store.append(conversation_id, MessageRole.ASSISTANT, "partial", status=MessageStatus.INCOMPLETE)
+    store.append(conversation_id, MessageRole.USER, "answered again")
+    store.append(conversation_id, MessageRole.ASSISTANT, "second reply")
+    store.append(conversation_id, MessageRole.USER, "pending")
+    session.commit()
+
+    assert [(m.role, m.content) for m in store.history(conversation_id, 10)] == [
+        ("user", "answered"),
+        ("assistant", "reply"),
+        ("user", "answered again"),
+        ("assistant", "second reply"),
+    ]
+    assert [m.content for m in store.history(conversation_id, 2)] == [
+        "answered again",
+        "second reply",
+    ]

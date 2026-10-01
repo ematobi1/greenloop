@@ -20,7 +20,7 @@ from typing import Annotated
 import anyio
 from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, ConfigDict, StringConstraints, field_validator
 from sqlalchemy.orm import Session
 
 from app.ai.engine import Abandoned, ChatEngine, Delta, Failed, Finished, PreparedTurn
@@ -66,6 +66,13 @@ class MessageCreate(BaseModel):
 
     content: Annotated[str, StringConstraints(min_length=1, max_length=200000)]
     provider: Annotated[str, StringConstraints(max_length=32)] | None = None
+
+    @field_validator("content")
+    @classmethod
+    def _not_blank(cls, content: str) -> str:
+        if not content.strip():
+            raise ValueError("Must contain non-whitespace text.")
+        return content
 
 
 class MessageOut(BaseModel):
