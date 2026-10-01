@@ -12,10 +12,12 @@ reply is discarded and the client gets CONVERSATION_NOT_FOUND (404, or an SSE
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from datetime import datetime
+from functools import partial
 from typing import Annotated
 
+import anyio
 from fastapi import APIRouter, Depends, Path, Request, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, ConfigDict, StringConstraints
@@ -213,8 +215,11 @@ async def send_message(
         ) from None
 
     if "text/event-stream" in request.headers.get("accept", ""):
-        return StreamingResponse(
-            _event_stream(engine, turn), media_type="text/event-stream", headers=SSE_HEADERS
+        return TurnStreamingResponse(
+            _event_stream(engine, turn),
+            on_close=partial(engine.close_if_unstarted, turn),
+            media_type="text/event-stream",
+            headers=SSE_HEADERS,
         )
     try:
         reply = await engine.run_to_completion(turn)
@@ -226,6 +231,24 @@ async def send_message(
         user_message=MessageOut.model_validate(turn.user_message),
         assistant_message=MessageOut.model_validate(reply),
     )
+
+
+class TurnStreamingResponse(StreamingResponse):
+    """Runs `on_close` after the response ends however it ends, shielded from
+    cancellation. Starlette may never start the body generator if the client
+    disconnects while headers are sent, and an unstarted generator runs no
+    `finally`, so turn cleanup can't live inside the generator alone."""
+
+    def __init__(self, content: AsyncIterator[str], *, on_close: Callable[[], None], **kwargs):
+        super().__init__(content, **kwargs)
+        self._on_close = on_close
+
+    async def __call__(self, scope, receive, send) -> None:
+        try:
+            await super().__call__(scope, receive, send)
+        finally:
+            with anyio.CancelScope(shield=True):
+                await anyio.to_thread.run_sync(self._on_close)
 
 
 def _sse(event: str, data: dict) -> str:
