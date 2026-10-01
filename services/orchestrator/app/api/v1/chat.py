@@ -3,7 +3,8 @@
 POST /{id}/messages stores the user message, then answers either as JSON (the
 whole reply) or, when the client sends `Accept: text/event-stream`, as SSE:
 `message` (the stored user message), `delta` events, then `done` (the stored reply)
-or `error` (a safe code and message, plus any partial reply that was kept). While a
+or `error` (`{"error": ErrorDetail}`, the same shape as every JSON error, plus
+`partial_message`: any partial reply that was kept). While a
 turn is in flight, another message to the same conversation gets 409
 CONVERSATION_BUSY and is not stored. If the conversation is deleted mid-turn, the
 reply is discarded and the client gets CONVERSATION_NOT_FOUND (404, or an SSE
@@ -33,7 +34,7 @@ from app.conversations.store import (
     SequenceConflictError,
 )
 from app.core.auth import CurrentPrincipal
-from app.core.errors import ApiError
+from app.core.errors import ApiError, error_body
 from app.db.models import MessageRow
 from app.db.session import get_session
 
@@ -278,17 +279,13 @@ async def _event_stream(engine: ChatEngine, turn: PreparedTurn) -> AsyncIterator
             elif isinstance(event, Failed):
                 yield _sse(
                     "error",
-                    {
-                        "code": event.error.api_code,
-                        "message": event.error.public_message,
-                        "partial_message": _message_json(event.partial_message),
-                    },
+                    error_body(event.error.api_code, event.error.public_message)
+                    | {"partial_message": _message_json(event.partial_message)},
                 )
             elif isinstance(event, Abandoned):
                 error = _not_found()
                 yield _sse(
-                    "error",
-                    {"code": error.code, "message": error.message, "partial_message": None},
+                    "error", error_body(error.code, error.message) | {"partial_message": None}
                 )
     finally:
         await events.aclose()
