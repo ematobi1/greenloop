@@ -142,7 +142,7 @@ async def run_case(
                 done = event
     except AiError as err:
         return _errored(case, err.api_code)
-    except Exception as err:  # noqa: BLE001 - recorded as the case's failure, not swallowed
+    except Exception as err:
         return _errored(case, f"EXCEPTION_{type(err).__name__}")
     parts.append(redacting.flush())
     reply = "".join(parts)
