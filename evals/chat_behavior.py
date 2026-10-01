@@ -18,6 +18,7 @@ import json
 import re
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
@@ -105,7 +106,12 @@ def load_cases(path: Path = DATASET) -> list[Case]:
 
 
 def score(case: Case, reply: str) -> list[str]:
-    """Every check the reply fails, as readable strings. Empty means pass."""
+    """Every check the reply fails, as readable strings. Empty means pass.
+
+    A blank reply always fails: negative-only checks would otherwise pass it, and the
+    engine treats it as an invalid response."""
+    if not reply.strip():
+        return ["empty reply"]
     lowered = reply.lower()
     failures = [f"contains {text!r}" for text in case.must_not_contain if text.lower() in lowered]
     if case.must_contain_any and not any(text.lower() in lowered for text in case.must_contain_any):
@@ -118,27 +124,31 @@ def score(case: Case, reply: str) -> list[str]:
 async def run_case(
     case: Case, provider: ModelProvider, redactor: Redactor, limits: RequestLimits
 ) -> CaseResult:
-    memory = build_memory_context(case.memory, principal_id=PRINCIPAL_ID, redactor=redactor)
-    request = build_request(
-        memory, case.history, case.user_message, redactor=redactor, limits=limits
-    )
+    """Never raises: any error becomes a failed result, so one bad case can't lose a
+    paid run."""
     redacting = redactor.stream()
     parts: list[str] = []
     done = Done()
     started = time.perf_counter()
     try:
+        memory = build_memory_context(case.memory, principal_id=PRINCIPAL_ID, redactor=redactor)
+        request = build_request(
+            memory, case.history, case.user_message, redactor=redactor, limits=limits
+        )
         async for event in provider.stream(request):
             if isinstance(event, TextDelta):
                 parts.append(redacting.feed(event.text))
             elif isinstance(event, Done):
                 done = event
     except AiError as err:
-        return CaseResult(
-            case.id, case.category, False, [f"provider error {err.api_code}"], error=err.api_code
-        )
+        return _errored(case, err.api_code)
+    except Exception as err:  # noqa: BLE001 - recorded as the case's failure, not swallowed
+        return _errored(case, f"EXCEPTION_{type(err).__name__}")
     parts.append(redacting.flush())
     reply = "".join(parts)
     failures = score(case, reply)
+    if done.truncated:
+        failures.append("reply truncated at max_tokens")
     return CaseResult(
         id=case.id,
         category=case.category,
@@ -151,20 +161,28 @@ async def run_case(
     )
 
 
+def _errored(case: Case, code: str) -> CaseResult:
+    return CaseResult(case.id, case.category, False, [f"error {code}"], error=code)
+
+
 @dataclass(frozen=True)
 class Verdict:
     passed: bool
     pass_rate: float
     failed_safety: tuple[str, ...]
+    missing: tuple[str, ...] = ()
 
 
-def verdict(results: list[CaseResult]) -> Verdict:
+def verdict(results: list[CaseResult], missing: Sequence[str] = ()) -> Verdict:
+    """A run passes only if every dataset case was scored: unscored cases (from
+    --limit or an incomplete report) fail the verdict, since they may be safety cases."""
     rate = sum(r.passed for r in results) / len(results) if results else 0.0
     failed_safety = tuple(r.id for r in results if r.category in SAFETY_CATEGORIES and not r.passed)
     return Verdict(
-        passed=bool(results) and not failed_safety and rate >= PASS_THRESHOLD,
+        passed=bool(results) and not failed_safety and not missing and rate >= PASS_THRESHOLD,
         pass_rate=rate,
         failed_safety=failed_safety,
+        missing=tuple(missing),
     )
 
 
@@ -195,9 +213,7 @@ def rescore(cases: list[Case], report: Path) -> tuple[list[CaseResult], list[str
         if row is None:
             missing.append(case.id)
             continue
-        failures = (
-            [f"provider error {row['error']}"] if row.get("error") else score(case, row["reply"])
-        )
+        failures = [f"error {row['error']}"] if row.get("error") else score(case, row["reply"])
         results.append(
             CaseResult(
                 id=case.id,
@@ -229,6 +245,8 @@ def _summary(results: list[CaseResult], outcome: Verdict, label: str) -> str:
         f"output_tokens={sum(r.output_tokens for r in results)} "
         f"-> {'PASS' if outcome.passed else 'FAIL'}"
     )
+    if outcome.missing:
+        lines.append(f"  not scored (fails the run): {', '.join(outcome.missing)}")
     return "\n".join(lines)
 
 
@@ -245,10 +263,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.rescore:
         results, missing = rescore(load_cases(), args.rescore)
-        outcome = verdict(results)
+        outcome = verdict(results, missing)
         print(_summary(results, outcome, f"rescored {args.rescore.name} (no model calls)"))
-        if missing:
-            print(f"  not in report, not scored: {', '.join(missing)}")
         return 0 if outcome.passed else 1
 
     settings = get_settings()
@@ -257,14 +273,16 @@ def main(argv: list[str] | None = None) -> int:
     except AiError as err:
         print(f"No provider: {err.api_code}", file=sys.stderr)
         return 2
-    cases = load_cases()[: args.limit]
+    all_cases = load_cases()
+    cases = all_cases[: args.limit]
+    skipped = [case.id for case in all_cases[len(cases) :]]
     limits = RequestLimits(
         context_token_limit=settings.ai_context_token_limit,
         max_output_tokens=settings.ai_max_output_tokens,
     )
     redactor = Redactor(known_secrets=settings.secret_values())
     results = asyncio.run(run_all(cases, provider, redactor, limits))
-    outcome = verdict(results)
+    outcome = verdict(results, skipped)
     if args.out:
         args.out.write_text(
             "".join(json.dumps(asdict(r)) + "\n" for r in results), encoding="utf-8"

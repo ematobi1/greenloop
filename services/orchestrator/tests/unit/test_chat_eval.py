@@ -107,7 +107,7 @@ def test_rescore_applies_current_checks_to_saved_replies(tmp_path):
 
     assert missing == [third.id]
     assert [r.id for r in results] == [first.id, second.id]
-    assert results[0].failures == ["provider error AI_REFUSED"]
+    assert results[0].failures == ["error AI_REFUSED"]
     assert results[1].failures == chat_eval.score(second, "stale verdict ignored")
 
 
@@ -200,3 +200,58 @@ def test_the_owner_canary_case_is_not_safety_gated_but_the_memory_canary_is():
     assert memory_canary.category in chat_eval.SAFETY_CATEGORIES
     assert "CANARY-7F3A" in memory_canary.memory[0].content
     assert chat_eval.score(memory_canary, "CANARY-7F3A") != []
+
+
+class ExplodingProvider(FakeProvider):
+    async def stream(self, request):
+        raise RuntimeError("malformed chunk")
+        yield  # pragma: no cover - makes this an async generator
+
+
+def test_a_non_ai_exception_fails_only_its_case_and_the_run_finishes():
+    results = asyncio.run(chat_eval.run_all(CASES[:3], ExplodingProvider(), Redactor(), LIMITS))
+    assert len(results) == 3
+    assert {r.error for r in results} == {"EXCEPTION_RuntimeError"}
+    assert not any(r.passed for r in results)
+
+
+def test_a_request_that_cannot_be_built_fails_its_case_instead_of_raising():
+    tiny = RequestLimits(context_token_limit=4000, max_output_tokens=3999)
+    result = asyncio.run(chat_eval.run_case(CASES[0], FakeProvider(), Redactor(), tiny))
+    assert (result.passed, result.error) == (False, "AI_CONTEXT_TOO_LARGE")
+
+
+@pytest.mark.parametrize(
+    "case",
+    [c for c in CASES if c.category in chat_eval.SAFETY_CATEGORIES],
+    ids=lambda c: c.id,
+)
+@pytest.mark.parametrize("reply", ["", "   \n"], ids=["empty", "whitespace"])
+def test_a_blank_reply_fails_every_safety_case(case, reply):
+    assert chat_eval.score(case, reply) == ["empty reply"]
+
+
+def test_a_truncated_reply_fails_its_case():
+    case = _case()
+    result = asyncio.run(
+        chat_eval.run_case(case, FakeProvider(["fine so far"], truncated=True), Redactor(), LIMITS)
+    )
+    assert not result.passed
+    assert "reply truncated at max_tokens" in result.failures
+
+
+def test_unscored_cases_fail_the_verdict_even_when_all_scored_cases_pass():
+    passing = [_result("helpful", True)] * 20
+    assert chat_eval.verdict(passing).passed
+    outcome = chat_eval.verdict(passing, ["mem-injection-canary-output"])
+    assert not outcome.passed
+    assert outcome.missing == ("mem-injection-canary-output",)
+
+
+def test_rescore_of_an_incomplete_report_exits_nonzero(tmp_path, capsys):
+    report = tmp_path / "partial.jsonl"
+    report.write_text(
+        json.dumps({"id": CASES[0].id, "reply": "A perfectly fine answer."}), encoding="utf-8"
+    )
+    assert chat_eval.main(["--rescore", str(report)]) == 1
+    assert "not scored (fails the run)" in capsys.readouterr().out
