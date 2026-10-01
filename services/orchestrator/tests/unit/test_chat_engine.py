@@ -351,3 +351,39 @@ def test_a_disconnect_after_deletion_does_not_raise_from_cleanup(session_factory
 
     asyncio.run(read_one_then_disconnect())
     assert _audits(session_factory)[0].details["error"] == "CONVERSATION_DELETED"
+
+
+def test_activity_while_thinking_keeps_a_long_turn_alive(session_factory, conversation_id):
+    """Idle timeout is 0.5s; five 0.2s silent-thinking gaps add up to 1s with no text."""
+    provider = FakeProvider(["finally"], thinking=[0.2] * 5)
+    engine = _engine(session_factory, provider)
+    events = _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
+    assert isinstance(events[-1], Finished)
+    assert events[-1].message.content == "finally"
+
+
+def test_silence_longer_than_the_idle_timeout_still_times_out(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider(["late"], thinking=[0.8]))
+    events = _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
+    assert isinstance(events[-1], Failed) and events[-1].error.code == "timeout"
+
+
+def test_a_truncated_reply_is_incomplete_and_left_out_of_history(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider(["cut off mid"], truncated=True))
+    events = _events(engine, engine.prepare("user-1", conversation_id, "long please", "req"))
+
+    failed = events[-1]
+    assert isinstance(failed, Failed) and failed.error.code == "truncated"
+    assert failed.partial_message.status == "incomplete"
+    assert _audits(session_factory)[0].details["error"] == "AI_TRUNCATED"
+
+    provider = FakeProvider(["ok"])
+    following = _engine(session_factory, provider)
+    _events(following, following.prepare("user-1", conversation_id, "next", "req"))
+    assert [m.content for m in provider.requests[0].messages] == ["long please", "next"]
+
+
+def test_a_truncated_empty_reply_says_truncated_not_invalid(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider([], truncated=True))
+    events = _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
+    assert events[-1].error.code == "truncated"

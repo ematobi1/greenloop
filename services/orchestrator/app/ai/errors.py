@@ -14,6 +14,7 @@ PUBLIC_MESSAGES = {
     "rejected": "The model provider rejected the request.",
     "refused": "The model declined to answer this request.",
     "invalid_response": "The model provider returned an invalid response.",
+    "truncated": "The reply was cut off because it reached the length limit.",
     "context_too_large": "The message is too large for the model context.",
 }
 
@@ -25,6 +26,7 @@ HTTP_STATUS = {
     "rejected": 502,
     "refused": 422,
     "invalid_response": 502,
+    "truncated": 502,
     "context_too_large": 422,
 }
 

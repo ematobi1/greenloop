@@ -4,6 +4,13 @@ The SDK retries connection errors, 408, 409, 429 and 5xx with backoff before any
 output arrives (`max_retries`). Failures are mapped to AiError codes; the vendor
 message is logged with the request id, never returned to the client. A refusal
 stop reason is a failure, not an empty answer.
+
+Opus 5.5 always thinks, and with the default `display: "omitted"` thinking streams
+nothing, so a long think looks like a stalled stream to the idle timeout. Requesting
+`display: "summarized"` (billed the same) makes thinking stream deltas, which become
+Activity events; their text is never forwarded or stored. Only text deltas become
+reply text. The SDK also emits helper events that repeat raw deltas, so those are
+skipped to avoid duplicates.
 """
 
 from collections.abc import AsyncIterator
@@ -13,9 +20,18 @@ import structlog
 from pydantic import SecretStr
 
 from app.ai.errors import AiError
-from app.ai.providers.base import Done, GenerationRequest, ProviderConfig, StreamEvent, TextDelta
+from app.ai.providers.base import (
+    Activity,
+    Done,
+    GenerationRequest,
+    ProviderConfig,
+    StreamEvent,
+    TextDelta,
+)
 
 logger = structlog.get_logger(__name__)
+
+SDK_HELPER_EVENTS = frozenset({"text", "thinking", "signature", "input_json", "citation"})
 
 
 class AnthropicProvider:
@@ -42,10 +58,19 @@ class AnthropicProvider:
                 system=request.system,
                 messages=[{"role": m.role, "content": m.content} for m in request.messages],
                 output_config={"effort": self._effort},
+                thinking={"type": "adaptive", "display": "summarized"},
             ) as stream:
-                async for text in stream.text_stream:
-                    if text:
-                        yield TextDelta(text)
+                async for event in stream:
+                    if event.type in SDK_HELPER_EVENTS:
+                        continue
+                    if (
+                        event.type == "content_block_delta"
+                        and event.delta.type == "text_delta"
+                        and event.delta.text
+                    ):
+                        yield TextDelta(event.delta.text)
+                    else:
+                        yield Activity()
                 final = await stream.get_final_message()
                 request_id = stream.request_id
         except anthropic.APITimeoutError as err:
@@ -76,6 +101,7 @@ class AnthropicProvider:
             input_tokens=final.usage.input_tokens,
             output_tokens=final.usage.output_tokens,
             request_id=request_id,
+            truncated=final.stop_reason == "max_tokens",
         )
 
 

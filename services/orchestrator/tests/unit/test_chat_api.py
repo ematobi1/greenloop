@@ -247,3 +247,10 @@ def test_deleting_the_conversation_mid_turn_is_reported_as_not_found(
         assert response.status_code == 404
         assert response.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
     assert [m.role for m in _stored(session_factory)] == ["user"]
+
+
+def test_a_truncated_json_turn_is_502_ai_truncated(client, auth, conversation_id, use_provider):
+    use_provider(FakeProvider(["cut"], truncated=True))
+    response = _send(client, auth, conversation_id)
+    assert response.status_code == 502
+    assert response.json()["error"]["code"] == "AI_TRUNCATED"
