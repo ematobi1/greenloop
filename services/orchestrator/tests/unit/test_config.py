@@ -14,6 +14,8 @@ ENV_VARS = (
     "ALLOWED_HOSTS",
     "CORS_ORIGINS",
     "GREENLOOP_ENV_FILE",
+    "GREENLOOP_CHAT_MODEL",
+    "ANTHROPIC_MODEL",
 )
 
 
@@ -28,7 +30,24 @@ def test_defaults_when_environment_is_empty():
     assert settings.environment == "dev"
     assert settings.database_url is None
     assert settings.anthropic_api_key is None
-    assert settings.anthropic_model == "claude-opus-5-5"
+    assert settings.chat_model == "claude-opus-5-5"
+
+
+def test_greenloop_chat_model_sets_the_chat_model(monkeypatch):
+    monkeypatch.setenv("GREENLOOP_CHAT_MODEL", "claude-sonnet-5-5")
+    assert Settings(_env_file=None).chat_model == "claude-sonnet-5-5"
+
+
+def test_anthropic_model_is_no_longer_read(monkeypatch):
+    monkeypatch.setenv("ANTHROPIC_MODEL", "claude-haiku-4-5")
+    assert Settings(_env_file=None).chat_model == "claude-opus-5-5"
+
+
+@pytest.mark.parametrize("value", ["claude opus", "model;rm", "x" * 129])
+def test_rejects_malformed_chat_model(monkeypatch, value):
+    monkeypatch.setenv("GREENLOOP_CHAT_MODEL", value)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
 
 
 def test_loads_values_from_environment(monkeypatch):
@@ -171,3 +190,13 @@ def test_a_missing_root_env_is_harmless(tmp_path):
     package_file = tmp_path / "services" / "orchestrator" / "app" / "core" / "config.py"
     settings = Settings(_env_file=env_file_path(package_file))
     assert settings.database_url is None
+
+
+def test_output_cap_leaves_room_for_thinking_and_for_the_prompt():
+    """Opus 5.5 thinking counts against max_tokens: at effort medium a hard prompt used
+    all of 16k and was cut off mid-reply (paid smoke run, 2026-10-01). 32k doubles that
+    while the 150k context limit still leaves 118k for system prompt, history and memory."""
+    settings = Settings(_env_file=None)
+    assert settings.ai_max_output_tokens == 32000
+    assert settings.ai_context_token_limit == 150000
+    assert settings.ai_context_token_limit - settings.ai_max_output_tokens >= 100000
