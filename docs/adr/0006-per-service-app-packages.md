@@ -30,3 +30,12 @@ Option A.
 - Tools must be run from the right folder. Running `pytest` from the root, or opening a Python shell at the root and importing `app`, does not work; the scripts and README say so.
 - Each service's tests run in their own process, which keeps them independent.
 - If a service ever needs to be imported by another Python process (for example a shared worker), revisit with option B for that service.
+
+## Addendum (2026-10-01): the chat behavior eval
+
+`evals/chat_behavior.py` imports orchestrator internals by putting `services/orchestrator` on `sys.path`, and `services/orchestrator/tests/unit/test_chat_eval.py` loads that file by path. This is the one sanctioned exception to the rule above.
+
+- Why: the eval has to assemble requests exactly as production does. It calls `app.ai.context.build_turn_request`, the same function `ChatEngine.prepare` uses, and a gate test fails if they stop sharing it.
+- Limits: the eval runs from `services/orchestrator` and imports only `app.ai.*`, `app.core.redaction` and `app.core.config`. No other service may import orchestrator code.
+- Cost: a change under `evals/` can fail the orchestrator test suite. That's intended, since the eval's scorer is gate-tested there.
+- Revisit with option B if a second consumer appears.

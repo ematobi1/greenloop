@@ -8,6 +8,7 @@ GreenLoop acts on a person's behalf with their memory and their accounts. The de
 |---|---|---|---|
 | Browser to orchestrator | Orchestrator | Every request | `core/auth.py` resolves the principal from a bearer token (only its SHA256 is stored; missing, unknown, revoked and disabled all return the same 401); request validation; error envelope hides internals |
 | Memory to prompt | System prompt and current user message | All retrieved memory | `memory/context_builder.py`: principal filter, sanitize, redact, bound, escape |
+| History to prompt | System prompt and current user message | Earlier conversation turns, including replies that may quote poisoned memory | `ai/context.py` and `conversations/store.py`: owner's conversation only, answered turns only (refused, failed and cut-off turns are dropped), every message redacted, newest turns kept within the token budget. Assistant history is not re-framed as untrusted yet; tracked for when chat gets tools |
 | Model to tools | Permission model and broker | Every model-proposed tool call | `permissions/policy.py`, then the broker's own policy |
 | Orchestrator to broker | Broker | The orchestrator's request | Broker re-evaluates policy and consumes approvals itself |
 | Broker to MCP servers | Broker | Tool output | Result validation and self-correction; tool output is data |
@@ -15,7 +16,7 @@ GreenLoop acts on a person's behalf with their memory and their accounts. The de
 
 ## Principals and scope
 
-Every request acts for exactly one principal. Memory, approvals and audit records carry `principal_id`, and every query filters on it server-side. `context_builder` also drops any record whose principal does not match, as a second check.
+Every request acts for exactly one principal. Memory, conversations, approvals and audit records carry `principal_id`, and every query filters on it server-side; another principal's conversation returns the same 404 as a missing one. `context_builder` also drops any record whose principal does not match, as a second check.
 
 ## Memory
 
@@ -68,7 +69,9 @@ Proposed-code execution is locked twice: `SELF_IMPROVEMENT_EXECUTION_ENABLED` de
 | Approval replay or reuse for a different operation | SHA256 binding, single use, principal check | `services/broker/tests/test_approval_binding.py` |
 | Tampering with the audit trail | Hash-chained broker ledger; append-only triggers on orchestrator `audit_records` | `services/broker/tests/test_ledger.py`, `services/orchestrator/tests/integration/test_postgres.py` |
 | Stolen database dump yields API tokens | Only token SHA256 stored; tokens are 256 random bits shown once | `tests/unit/test_tokens.py` |
-| Secret leakage via logs, errors, streams or prompts | `SecretStr`; one `Redactor` seeded with every configured secret value, applied to memory context, model output streams and every log line (including stack traces); generic 500 | `tests/unit/test_redaction.py`, `tests/unit/test_logging.py`, `tests/unit/test_errors.py` |
+| Secret leakage via logs, errors, streams or prompts | `SecretStr`; one `Redactor` seeded with every configured secret value, applied to memory context, chat history and user messages before they reach the model, model output streams (including JSON-form secrets split across chunks) and every log line (including stack traces); generic 500. User messages are stored unredacted at rest (owner-only) | `tests/unit/test_redaction.py`, `tests/unit/test_logging.py`, `tests/unit/test_errors.py`, `tests/unit/test_chat_engine.py` |
+| Chat turns interleave or escape the audit trail | One turn per conversation (conditional-UPDATE lease, 409 `CONVERSATION_BUSY`); every turn is audited, including disconnects before streaming, deleted conversations and store failures | `tests/unit/test_chat_engine.py`, `tests/integration/test_conversations_postgres.py` |
+| One user runs up model cost | **Not mitigated**: no per-principal rate or cost limit (issue M10). Blocks any non-local deployment | — |
 | DNS rebinding against the local API | Host header allowlist, 400 before any route runs | `tests/unit/test_middleware.py` |
 | Secrets baked into images | `.dockerignore`; images run as non-root | Stage F image inspection |
 | Cross-principal memory access | Server-side principal filter, composite foreign key on successors, context builder check | `test_context_builder.py::TestFiltering`, `tests/unit/test_memory_store.py`, `tests/integration/test_memory_postgres.py` |

@@ -21,8 +21,8 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install "ruff>=0.6"
-      - run: ruff check packages services
-      - run: ruff format --check packages services
+      - run: ruff check packages services evals
+      - run: ruff format --check packages services evals
 
   python-test:
     runs-on: ubuntu-24.04
