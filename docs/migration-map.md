@@ -49,7 +49,7 @@ Source: branch `feature/canonical-orchestrator` at `69628c9`. Decisions are reco
 | 1 | Core platform: single Redactor, structured logging, errors, request id, Host allowlist, CORS | ported |
 | 2 | Postgres baseline, token auth to principals, audit records, `/v1/health` readiness | ported |
 | 3 | Append-only memory store on Postgres | ported |
-| 4 | Conversations (soft delete, write-once messages), streaming AI engine (JSON and SSE), Anthropic and Ollama providers, prompts, chat behavior eval (`evals/chat_behavior.py`) | ported; first paid eval run pending |
+| 4 | Conversations (soft delete, write-once messages), streaming AI engine (JSON and SSE), Anthropic and Ollama providers, prompts, chat behavior eval (`evals/chat_behavior.py`) | ported on `feature/port-conversations-ai`, not merged. Paid runs so far: baseline 26/29, after-run 27/30 (30/30 when its saved replies are rescored on the corrected checks). Still pending: a fresh after-run on the corrected checks and a 1-call thinking smoke test, then checkpoint 3. Tracked issues M9–M11 (`.dev-loop/issues/`); M10, no per-principal rate or cost limit, blocks any non-local deployment |
 | 5 | Agents, dispatch, execution memory, approvals API | not started |
 
 ## Porting rules

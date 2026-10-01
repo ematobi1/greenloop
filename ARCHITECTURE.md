@@ -60,7 +60,11 @@ This document maps every folder to its role, owning component and roadmap phase.
                     |  postgres-readonly, google-workspace  |
                     +---------------------------------------+
 
-  Postgres 16 + pgvector:  memory, audit, approvals, workflows
+  Postgres 16 + pgvector:  memory, audit, conversations and messages, approvals, workflows
+
+  Chat today goes api/v1/chat -> ai/engine directly (conversations/ holds the
+  transcript and the one-turn-at-a-time lease); orchestration/reasoning and the
+  planner are still stubs and will sit in front of ai/engine when they land.
   packages/contracts:      shared schemas imported by every Python service
   services/self-improvement: proposals + validation, execution disabled
 ```
@@ -115,6 +119,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 | `services/broker/` | Policy, approval binding and ledger gate in front of MCP | Broker | 3 |
 | `services/self-improvement/` | Proposal, validation, isolation and evidence pipeline; execution disabled | Self-improvement | 7 |
 | `apps/web/` | Next.js + TypeScript UI: chat, memory, approvals, agents, workflows, audit, settings | Frontend | 2, 5 |
+| `evals/chat_behavior.py` | Chat behavior eval covering both prompt quality and injection; imports orchestrator request assembly (ADR 0006 addendum) | Quality | 2, 6 |
 | `evals/prompts/` | Prompt quality evals | Quality | 2, 6 |
 | `evals/injection/` | Prompt injection and memory-poisoning evals | Quality | 2, 6 |
 | `evals/datasets/` | Eval inputs and expected outputs | Quality | 2, 6 |
@@ -128,7 +133,8 @@ This document maps every folder to its role, owning component and roadmap phase.
 | `main.py` | FastAPI app factory and router wiring | 1 |
 | `api/v1/` | REST endpoints: health, chat, memory, plans, agents, approvals, audit | 1 (health), 2 |
 | `core/` | Config from environment, auth, logging, errors | 1 (config), 2 (auth) |
-| `ai/` | Engine, system prompts, context framing, model providers | 2 |
+| `ai/` | Streaming chat engine, system prompts, request assembly (`context.py`), model providers (Anthropic default, Ollama optional), AI error codes | 2 |
+| `conversations/` | Owner-scoped conversations, ordered write-once messages, the per-conversation turn lease | 2 |
 | `orchestration/` | Reasoning, planner, dispatcher | 2 (reasoning, planner), 4 (dispatcher) |
 | `memory/` | Store, retrieval, context builder, provenance, embeddings | 1 (context builder), 2 |
 | `agents/` | Agent base, registry, planner, research and coding agents | 4 |
