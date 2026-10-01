@@ -12,6 +12,7 @@ from app.conversations.store import (
     ConversationBusyError,
     ConversationNotFoundError,
     ConversationStore,
+    SequenceConflictError,
 )
 from app.core.config import Settings
 from app.core.redaction import REDACTED, Redactor
@@ -426,3 +427,46 @@ def test_a_disconnect_mid_stream_is_audited_as_client_disconnected(
 
     asyncio.run(read_one_then_disconnect())
     assert _audits(session_factory)[0].details["error"] == "AI_CLIENT_DISCONNECTED"
+
+
+def _fail_assistant_append(monkeypatch):
+    real_append = ConversationStore.append
+
+    def append(self, conversation_id, role, *args, **kwargs):
+        if role == "assistant":
+            raise SequenceConflictError(conversation_id)
+        return real_append(self, conversation_id, role, *args, **kwargs)
+
+    monkeypatch.setattr(ConversationStore, "append", append)
+
+
+def test_a_failure_storing_the_reply_still_audits_and_releases(
+    session_factory, conversation_id, monkeypatch
+):
+    engine = _engine(session_factory, FakeProvider(["lost reply"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+    _fail_assistant_append(monkeypatch)
+
+    events = _events(engine, turn)
+
+    assert isinstance(events[-1], Failed)
+    assert (events[-1].error.code, events[-1].partial_message) == ("unavailable", None)
+    [audit] = _audits(session_factory)
+    assert (audit.outcome, audit.details["error"]) == ("failed", "STORE_FAILED")
+    assert audit.details["assistant_message_id"] is None
+    assert _lease_holder(session_factory, conversation_id) is None
+
+
+def test_finish_never_raises_even_when_the_fallback_audit_fails(
+    session_factory, conversation_id, monkeypatch
+):
+    engine = _engine(session_factory, FakeProvider(["x"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("database gone")
+
+    monkeypatch.setattr(engine_module, "_record_turn_audit", broken)
+    events = _events(engine, turn)
+    assert isinstance(events[-1], Failed)
+    assert _audits(session_factory) == []

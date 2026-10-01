@@ -86,6 +86,13 @@ class Abandoned:
 EngineEvent = Delta | Finished | Failed | Abandoned
 
 
+@dataclass(frozen=True)
+class FinishResult:
+    message: MessageRow | None
+    abandoned: bool
+    store_failed: bool
+
+
 class ChatEngine:
     def __init__(
         self,
@@ -203,15 +210,15 @@ class ChatEngine:
             failure = AiError("truncated")
         if failure is None and not text.strip():
             failure = AiError("invalid_response")
-        message, abandoned = await asyncio.to_thread(
-            self._finish, turn, text, done, started, failure
-        )
-        if abandoned:
+        result = await asyncio.to_thread(self._finish, turn, text, done, started, failure)
+        if result.abandoned:
             yield Abandoned()
+        elif result.store_failed:
+            yield Failed(failure or AiError("unavailable"), None)
         elif failure is not None:
-            yield Failed(failure, message)
+            yield Failed(failure, result.message)
         else:
-            yield Finished(message)
+            yield Finished(result.message)
 
     async def run_to_completion(self, turn: PreparedTurn) -> MessageRow:
         """The stored reply. Raises AiError, or ConversationNotFoundError if the
@@ -267,13 +274,58 @@ class ChatEngine:
         done: Done,
         started: float,
         failure: AiError | None,
-    ) -> tuple[MessageRow | None, bool]:
+    ) -> FinishResult:
         """Store the reply (partial text as incomplete), release the turn lease, audit
-        the turn and log a trace, all in one transaction. Returns the stored reply and
-        whether the turn was abandoned because the conversation was deleted mid-turn;
-        then the reply is discarded but the turn is still audited, and nothing raises."""
+        the turn and log a trace, all in one transaction. Never raises.
+
+        If the conversation was deleted mid-turn, the reply is discarded and the turn
+        is audited as CONVERSATION_DELETED. If that transaction fails for any other
+        reason, a second transaction still releases the lease and audits the turn as
+        STORE_FAILED, so no turn goes unaudited while the database is reachable."""
         config = turn.provider.config
-        latency_ms = round((time.perf_counter() - started) * 1000)
+        details = {
+            "provider": config.name,
+            "model": config.model,
+            "latency_ms": round((time.perf_counter() - started) * 1000),
+            "input_tokens": done.input_tokens,
+            "output_tokens": done.output_tokens,
+            "stop_reason": done.stop_reason,
+            "memory_ids": list(turn.memory_ids),
+            "user_message_id": turn.user_message.message_id,
+            "assistant_message_id": None,
+            "error": failure.api_code if failure else None,
+        }
+        try:
+            result = self._store_turn(turn, text, done, failure, details)
+        except Exception:
+            logger.error("chat_turn_store_failed", exc_info=True)
+            details["error"] = "STORE_FAILED"
+            self._audit_after_store_failure(turn, details)
+            result = FinishResult(message=None, abandoned=False, store_failed=True)
+        if result.abandoned:
+            event = "chat_turn_abandoned"
+        elif details["error"]:
+            event = "chat_turn_failed"
+        else:
+            event = "chat_turn_completed"
+        logger.info(
+            event,
+            conversation_id=turn.conversation_id,
+            provider_request_id=done.request_id,
+            **{key: value for key, value in details.items() if key != "memory_ids"},
+            memory_count=len(turn.memory_ids),
+        )
+        return result
+
+    def _store_turn(
+        self,
+        turn: PreparedTurn,
+        text: str,
+        done: Done,
+        failure: AiError | None,
+        details: dict,
+    ) -> FinishResult:
+        config = turn.provider.config
         with self._session_factory() as session:
             store = ConversationStore(session, turn.principal_id, turn.correlation_id)
             store.release_turn(turn.conversation_id, turn.turn_id)
@@ -295,50 +347,43 @@ class ChatEngine:
                     )
                 except ConversationNotFoundError:
                     abandoned = True
-            error = failure.api_code if failure else None
             if abandoned:
-                error = "CONVERSATION_DELETED"
-            details = {
-                "provider": config.name,
-                "model": config.model,
-                "latency_ms": latency_ms,
-                "input_tokens": done.input_tokens,
-                "output_tokens": done.output_tokens,
-                "stop_reason": done.stop_reason,
-                "memory_ids": list(turn.memory_ids),
-                "user_message_id": turn.user_message.message_id,
-                "assistant_message_id": message.message_id if message else None,
-                "error": error,
-            }
-            recorder.record(
-                session,
-                AuditRecord.model_validate(
-                    {
-                        "audit_id": f"aud-{turn.user_message.message_id.removeprefix('msg-')}",
-                        "principal_id": turn.principal_id,
-                        "actor": turn.principal_id,
-                        "action": "chat.turn",
-                        "resource_type": "conversation",
-                        "resource_id": turn.conversation_id,
-                        "outcome": AuditOutcome.FAILED if error else AuditOutcome.EXECUTED,
-                        "correlation_id": turn.correlation_id,
-                        "details": details,
-                    }
-                ),
-            )
+                details["error"] = "CONVERSATION_DELETED"
+            details["assistant_message_id"] = message.message_id if message else None
+            _record_turn_audit(session, turn, details)
             session.commit()
-        if abandoned:
-            event = "chat_turn_abandoned"
-        else:
-            event = "chat_turn_completed" if failure is None else "chat_turn_failed"
-        logger.info(
-            event,
-            conversation_id=turn.conversation_id,
-            provider_request_id=done.request_id,
-            **{key: value for key, value in details.items() if key != "memory_ids"},
-            memory_count=len(turn.memory_ids),
-        )
-        return message, abandoned
+        return FinishResult(message=message, abandoned=abandoned, store_failed=False)
+
+    def _audit_after_store_failure(self, turn: PreparedTurn, details: dict) -> None:
+        try:
+            with self._session_factory() as session:
+                ConversationStore(session, turn.principal_id, turn.correlation_id).release_turn(
+                    turn.conversation_id, turn.turn_id
+                )
+                _record_turn_audit(session, turn, details)
+                session.commit()
+        except Exception:
+            # The database is unreachable: the lease expires on its own; the log is the trace.
+            logger.error("chat_turn_audit_failed", exc_info=True)
+
+
+def _record_turn_audit(session: Session, turn: PreparedTurn, details: dict) -> None:
+    recorder.record(
+        session,
+        AuditRecord.model_validate(
+            {
+                "audit_id": f"aud-{turn.user_message.message_id.removeprefix('msg-')}",
+                "principal_id": turn.principal_id,
+                "actor": turn.principal_id,
+                "action": "chat.turn",
+                "resource_type": "conversation",
+                "resource_id": turn.conversation_id,
+                "outcome": AuditOutcome.FAILED if details["error"] else AuditOutcome.EXECUTED,
+                "correlation_id": turn.correlation_id,
+                "details": details,
+            }
+        ),
+    )
 
 
 async def _close(events: AsyncIterator) -> None:
