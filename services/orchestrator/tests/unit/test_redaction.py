@@ -178,3 +178,31 @@ class TestCurrentBehaviorPinned:
     def test_redaction_counts_each_hit(self):
         text = "password=hunter2abc and api_key: abcdef123456"
         assert Redactor().redact_counted(text)[1] == 2
+
+
+JSON_SECRETS = [
+    ('{"password": "hunter2-synthetic"}', '{"password": "[REDACTED]"}'),
+    ('{"api_key": "abcdef123456"}', '{"api_key": "[REDACTED]"}'),
+    ('{"apiKey":"abcdef123456"}', '{"apiKey":"[REDACTED]"}'),
+    ('{"db_password": "pa ss word 1"}', '{"db_password": "[REDACTED]"}'),
+    ('{"access_token": "tok-1234567"}', '{"access_token": "[REDACTED]"}'),
+    ("{'client_secret': 'cs-1234567'}", "{'client_secret': '[REDACTED]'}"),
+    ('{"Authorization": "Basic dXNlcjpwYXNz"}', '{"Authorization": "[REDACTED]"}'),
+]
+
+
+class TestJsonForm:
+    @pytest.mark.parametrize(("text", "expected"), JSON_SECRETS)
+    def test_json_and_dict_secrets_keep_the_key_and_hide_the_value(self, text, expected):
+        assert Redactor().redact(text) == expected
+
+    @pytest.mark.parametrize(("text", "expected"), JSON_SECRETS)
+    @pytest.mark.parametrize("chunk_size", [1, 2, 3, 5, 8, 13])
+    def test_json_secrets_split_across_chunks_are_redacted(self, text, expected, chunk_size):
+        padded = f"Here is the config: {text} done."
+        assert stream_in_chunks(Redactor(), padded, chunk_size) == (
+            f"Here is the config: {expected} done."
+        )
+
+    def test_short_json_values_stay_visible(self):
+        assert Redactor().redact('{"password": "abc"}') == '{"password": "abc"}'
