@@ -4,13 +4,17 @@ Three layers, applied in order:
 1. Exact known secrets (values from settings), longest first.
 2. Known credential shapes: private key blocks, provider API keys, GitHub, AWS and
    Slack tokens, JWTs.
-3. Labelled values: `Bearer x`, `Authorization: x`, `password=x`, `api_key: x` and
+3. Quoted keys (JSON and Python dicts): `"password": "x"`, `'db_password': 'x'`,
+   `"apiKey":"x"` keep the key and quotes and lose the value. A key matches when it
+   ends with a secret word, so `access_token` matches and `token_count` doesn't.
+4. Labelled values: `Bearer x`, `Authorization: x`, `password=x`, `api_key: x` and
    similar keep the label and lose the value.
 
 StreamRedactor applies the same rules to text that arrives in chunks. It holds back
 a short tail so a secret split across chunks is still caught, never splits right
-after a label such as "Bearer", and suppresses everything after an unterminated
-`-----BEGIN ... PRIVATE KEY-----` until its END marker arrives.
+after a label such as "Bearer" or inside a quoted value after a secret key, and
+suppresses everything after an unterminated `-----BEGIN ... PRIVATE KEY-----`
+until its END marker arrives.
 """
 
 import re
@@ -38,6 +42,12 @@ _SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,200}"),
     re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}"),
 )
+_LABEL_WORDS = (
+    r"api[_-]?key|secret|token|password|passwd|access[_-]?key|client[_-]?secret|authorization"
+)
+_QUOTED_KEY = re.compile(
+    rf"(?i)([\"'])([\w-]*(?:{_LABEL_WORDS}))\1(\s*:\s*)([\"'])[^\"'\\\n]{{6,200}}\4"
+)
 _LABELLED: tuple[re.Pattern[str], ...] = (
     re.compile(r"(?i)\b(bearer)(\s+)[A-Za-z0-9._~+/=\-]{8,200}"),
     re.compile(r"(?i)\b(authorization)(\s*[:=]\s*)(?!bearer\b)[^\s\"']{8,200}"),
@@ -50,6 +60,10 @@ _TRAILING_LABEL = re.compile(
     r"(?i)\b(bearer|authorization|api[_-]?key|secret|token|password|passwd|access[_-]?key"
     r"|client[_-]?secret)\s*[=:]?\s*$"
 )
+_TRAILING_QUOTED_KEY = re.compile(
+    rf"(?i)[\"'][\w-]*(?:{_LABEL_WORDS})(?:[\"']?\s*:?\s*[\"']?|[\"']\s*:\s*[\"'][^\"'\\\n]*)$"
+)
+"""A quoted secret key at the end of the pending text, or its value still open."""
 
 
 class Redactor:
@@ -73,6 +87,8 @@ class Redactor:
         for pattern in _SHAPES:
             text, hits = pattern.subn(REDACTED, text)
             count += hits
+        text, hits = _QUOTED_KEY.subn(rf"\1\2\1\3\4{REDACTED}\4", text)
+        count += hits
         for pattern in _LABELLED:
             text, hits = pattern.subn(rf"\1\2{REDACTED}", text)
             count += hits
@@ -129,8 +145,13 @@ class StreamRedactor:
             return 0
         boundary = max(pending.rfind(" ", 0, limit), pending.rfind("\n", 0, limit))
         if boundary > 0:
-            label = _TRAILING_LABEL.search(pending[: boundary + 1])
-            return label.start() if label else boundary + 1
+            head = pending[: boundary + 1]
+            starts = [
+                match.start()
+                for match in (_TRAILING_LABEL.search(head), _TRAILING_QUOTED_KEY.search(head))
+                if match
+            ]
+            return min(starts) if starts else boundary + 1
         return limit if len(pending) >= FORCE_FLUSH_CHARS else 0
 
 
