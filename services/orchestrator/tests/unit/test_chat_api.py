@@ -10,7 +10,7 @@ from tests.conftest import FakeProvider
 from app.ai.errors import AiError
 from app.ai.providers.registry import ProviderRegistry
 from app.api.v1.chat import TurnStreamingResponse
-from app.conversations.store import ConversationStore
+from app.conversations.store import ConversationStore, SequenceConflictError
 from app.db.models import AuditRecordRow, MessageRow
 
 URL = "/v1/conversations"
@@ -320,3 +320,19 @@ def test_an_sse_turn_is_audited_exactly_once(
             select(AuditRecordRow).where(AuditRecordRow.action == "chat.turn")
         ).all()
     assert len(audits) == 1
+
+
+def test_a_store_failure_over_sse_is_an_error_event_not_a_reset(
+    client, auth, conversation_id, use_provider, monkeypatch
+):
+    use_provider(FakeProvider(["streamed"]))
+    real_append = ConversationStore.append
+
+    def append(self, conversation_id, role, *args, **kwargs):
+        if role == "assistant":
+            raise SequenceConflictError(conversation_id)
+        return real_append(self, conversation_id, role, *args, **kwargs)
+
+    monkeypatch.setattr(ConversationStore, "append", append)
+    name, data = _events(_send(client, auth, conversation_id, headers=SSE))[-1]
+    assert (name, data["code"]) == ("error", "AI_UNAVAILABLE")
