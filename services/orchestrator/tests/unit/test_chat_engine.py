@@ -355,8 +355,10 @@ def test_a_disconnect_after_deletion_does_not_raise_from_cleanup(session_factory
 
 
 def test_activity_while_thinking_keeps_a_long_turn_alive(session_factory, conversation_id):
-    """Idle timeout is 0.5s; five 0.2s silent-thinking gaps add up to 1s with no text."""
-    provider = FakeProvider(["finally"], thinking=[0.2] * 5)
+    """Idle timeout is 0.5s; twenty 0.05s silent-thinking gaps add up to 1s with no text.
+    Each gap is a tenth of the timeout, so scheduler jitter on a busy machine can't
+    make a single gap look like a stall (five 0.2s gaps flaked once under load)."""
+    provider = FakeProvider(["finally"], thinking=[0.05] * 20)
     engine = _engine(session_factory, provider)
     events = _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
     assert isinstance(events[-1], Finished)
