@@ -387,3 +387,42 @@ def test_a_truncated_empty_reply_says_truncated_not_invalid(session_factory, con
     engine = _engine(session_factory, FakeProvider([], truncated=True))
     events = _events(engine, engine.prepare("user-1", conversation_id, "Hi", "req"))
     assert events[-1].error.code == "truncated"
+
+
+def test_closing_an_unstarted_turn_releases_the_lease_and_audits_it(
+    session_factory, conversation_id
+):
+    engine = _engine(session_factory, FakeProvider(["never streamed"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+
+    engine.close_if_unstarted(turn)
+
+    assert _lease_holder(session_factory, conversation_id) is None
+    assert [m.role for m in _messages(session_factory, conversation_id)] == ["user"]
+    [audit] = _audits(session_factory)
+    assert (audit.outcome, audit.details["error"]) == ("failed", "AI_CLIENT_DISCONNECTED")
+    engine.prepare("user-1", conversation_id, "again", "req")
+
+
+def test_closing_after_run_does_not_audit_twice(session_factory, conversation_id):
+    engine = _engine(session_factory, FakeProvider(["ok"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+    _events(engine, turn)
+    engine.close_if_unstarted(turn)
+    engine.close_if_unstarted(turn)
+    assert len(_audits(session_factory)) == 1
+
+
+def test_a_disconnect_mid_stream_is_audited_as_client_disconnected(
+    session_factory, conversation_id
+):
+    engine = _engine(session_factory, FakeProvider(["one ", "two"]))
+    turn = engine.prepare("user-1", conversation_id, "Hi", "req")
+
+    async def read_one_then_disconnect():
+        stream = engine.run(turn)
+        await stream.__anext__()
+        await stream.aclose()
+
+    asyncio.run(read_one_then_disconnect())
+    assert _audits(session_factory)[0].details["error"] == "AI_CLIENT_DISCONNECTED"

@@ -98,6 +98,7 @@ class ChatEngine:
         self._registry = registry
         self._redactor = redactor
         self._settings = settings
+        self._started: set[str] = set()
 
     def prepare(
         self,
@@ -156,6 +157,7 @@ class ChatEngine:
         )
 
     async def run(self, turn: PreparedTurn) -> AsyncIterator[EngineEvent]:
+        self._started.add(turn.turn_id)
         started = time.perf_counter()
         redacting = self._redactor.stream()
         emitted: list[str] = []
@@ -187,7 +189,7 @@ class ChatEngine:
         except (asyncio.CancelledError, GeneratorExit):
             # Synchronous on purpose: an await here could itself be cancelled.
             emitted.append(redacting.flush())
-            self._finish(turn, "".join(emitted), done, started, AiError("unavailable"))
+            self._finish(turn, "".join(emitted), done, started, AiError("client_disconnected"))
             raise
         except Exception:
             logger.error("chat_engine_unexpected_error", exc_info=True)
@@ -248,6 +250,15 @@ class ChatEngine:
             return
         if not renewed:
             logger.warning("chat_turn_lease_lost", conversation_id=turn.conversation_id)
+
+    def close_if_unstarted(self, turn: PreparedTurn) -> None:
+        """Release the lease and audit a turn whose run() never began, for example an
+        SSE client that disconnected before its body started streaming. No-op once
+        run() has started: run() finishes its own turn."""
+        if turn.turn_id in self._started:
+            return
+        self._started.add(turn.turn_id)
+        self._finish(turn, "", Done(), time.perf_counter(), AiError("client_disconnected"))
 
     def _finish(
         self,

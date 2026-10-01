@@ -1,11 +1,15 @@
+import asyncio
 import json
 
+import anyio
 import pytest
 from sqlalchemy import select
+from starlette.requests import ClientDisconnect
 from tests.conftest import FakeProvider
 
 from app.ai.errors import AiError
 from app.ai.providers.registry import ProviderRegistry
+from app.api.v1.chat import TurnStreamingResponse
 from app.conversations.store import ConversationStore
 from app.db.models import AuditRecordRow, MessageRow
 
@@ -254,3 +258,65 @@ def test_a_truncated_json_turn_is_502_ai_truncated(client, auth, conversation_id
     response = _send(client, auth, conversation_id)
     assert response.status_code == 502
     assert response.json()["error"]["code"] == "AI_TRUNCATED"
+
+
+def _never_started_body(started):
+    async def body():
+        started.append(True)
+        yield "never sent"
+
+    return body()
+
+
+def test_on_close_runs_when_sending_headers_fails():
+    """ASGI 2.4: the server raises from send; Starlette turns it into ClientDisconnect."""
+    closed, started = [], []
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    async def send(message):
+        raise OSError("client went away")
+
+    response = TurnStreamingResponse(
+        _never_started_body(started), on_close=lambda: closed.append(True)
+    )
+    with pytest.raises(ClientDisconnect):
+        asyncio.run(response({"type": "http", "asgi": {"spec_version": "2.4"}}, receive, send))
+    assert (closed, started) == ([True], [])
+
+
+@pytest.mark.parametrize("spec_version", ["2.0", "2.4"])
+def test_on_close_survives_the_request_being_cancelled(spec_version):
+    """The whole request is cancelled (level-triggered, as anyio does) while headers
+    are being sent: every await in `finally` is cancelled again unless shielded."""
+    closed, started = [], []
+
+    async def receive():
+        await anyio.sleep_forever()
+
+    async def send(message):
+        await anyio.sleep_forever()
+
+    response = TurnStreamingResponse(
+        _never_started_body(started), on_close=lambda: closed.append(True)
+    )
+
+    async def serve():
+        with anyio.move_on_after(0.05):
+            await response({"type": "http", "asgi": {"spec_version": spec_version}}, receive, send)
+
+    anyio.run(serve)
+    assert (closed, started) == ([True], [])
+
+
+def test_an_sse_turn_is_audited_exactly_once(
+    client, auth, conversation_id, use_provider, session_factory
+):
+    use_provider(FakeProvider(["ok"]))
+    _send(client, auth, conversation_id, headers=SSE)
+    with session_factory() as session:
+        audits = session.scalars(
+            select(AuditRecordRow).where(AuditRecordRow.action == "chat.turn")
+        ).all()
+    assert len(audits) == 1
