@@ -155,8 +155,8 @@ def test_an_sse_failure_sends_a_safe_error_with_the_partial_reply(
 
     name, data = events[-1]
     assert name == "error"
-    assert data["code"] == "AI_UNAVAILABLE"
-    assert data["message"] == "The model provider is unavailable. Try again shortly."
+    assert data["error"]["code"] == "AI_UNAVAILABLE"
+    assert data["error"]["message"] == "The model provider is unavailable. Try again shortly."
     assert data["partial_message"]["content"] == "partial"
     assert data["partial_message"]["status"] == "incomplete"
 
@@ -242,7 +242,7 @@ def test_deleting_the_conversation_mid_turn_is_reported_as_not_found(
 
     if stream:
         name, data = _events(response)[-1]
-        assert (name, data["code"], data["partial_message"]) == (
+        assert (name, data["error"]["code"], data["partial_message"]) == (
             "error",
             "CONVERSATION_NOT_FOUND",
             None,
@@ -335,7 +335,7 @@ def test_a_store_failure_over_sse_is_an_error_event_not_a_reset(
 
     monkeypatch.setattr(ConversationStore, "append", append)
     name, data = _events(_send(client, auth, conversation_id, headers=SSE))[-1]
-    assert (name, data["code"]) == ("error", "AI_UNAVAILABLE")
+    assert (name, data["error"]["code"]) == ("error", "AI_UNAVAILABLE")
 
 
 @pytest.mark.parametrize("content", ["   ", "\n\t "])
@@ -349,3 +349,18 @@ def test_a_blank_message_is_422_and_stores_nothing(
     assert "content" in response.json()["error"]["fields"]
     assert provider.requests == []
     assert _stored(session_factory) == []
+
+
+def test_an_sse_error_has_the_same_error_shape_as_json(client, auth, conversation_id, use_provider):
+    use_provider(FakeProvider(error=AiError("unavailable"), error_after=0))
+    json_error = _send(client, auth, conversation_id).json()
+    use_provider(FakeProvider(error=AiError("unavailable"), error_after=0))
+    name, sse_error = _events(_send(client, auth, conversation_id, headers=SSE))[-1]
+
+    assert name == "error"
+    assert sse_error["error"] == json_error["error"]
+    assert sse_error["error"] == {
+        "code": "AI_UNAVAILABLE",
+        "message": "The model provider is unavailable. Try again shortly.",
+    }
+    assert sse_error["partial_message"] is None

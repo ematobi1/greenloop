@@ -58,6 +58,16 @@ def _safe(text: str) -> str:
     return text.strip()[:MAX_MESSAGE_CHARS] or "Error."
 
 
+def error_body(code: str, message: str, fields: dict[str, str] | None = None) -> dict:
+    """`{"error": ErrorDetail}`, validated by the contract. Also used for SSE error events."""
+    detail = ErrorDetail(
+        code=code,
+        message=_safe(message),
+        fields={name: _safe(text) for name, text in (fields or {}).items()},
+    )
+    return {"error": detail.model_dump(exclude_defaults=True)}
+
+
 def error_response(
     status_code: int,
     code: str,
@@ -66,13 +76,7 @@ def error_response(
     fields: dict[str, str] | None = None,
     headers: dict[str, str] | None = None,
 ) -> JSONResponse:
-    detail = ErrorDetail(
-        code=code,
-        message=_safe(message),
-        fields={name: _safe(text) for name, text in (fields or {}).items()},
-    )
-    body = {"error": detail.model_dump(exclude_defaults=True)}
-    return JSONResponse(body, status_code=status_code, headers=headers)
+    return JSONResponse(error_body(code, message, fields), status_code=status_code, headers=headers)
 
 
 async def _api_error(_: Request, exc: ApiError) -> JSONResponse:
