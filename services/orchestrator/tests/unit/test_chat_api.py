@@ -219,3 +219,31 @@ def test_a_busy_conversation_is_409_and_stores_nothing(
         assert response.json()["error"]["code"] == "CONVERSATION_BUSY"
     assert provider.requests == []
     assert _stored(session_factory) == []
+
+
+@pytest.mark.parametrize("stream", [False, True], ids=["json", "sse"])
+def test_deleting_the_conversation_mid_turn_is_reported_as_not_found(
+    client, auth, conversation_id, use_provider, session_factory, stream
+):
+    class DeletingProvider(FakeProvider):
+        async def stream(self, request):
+            with session_factory() as session:
+                ConversationStore(session, "user-1", "req").delete(conversation_id)
+                session.commit()
+            async for event in super().stream(request):
+                yield event
+
+    use_provider(DeletingProvider(["gone"]))
+    response = _send(client, auth, conversation_id, headers=SSE if stream else None)
+
+    if stream:
+        name, data = _events(response)[-1]
+        assert (name, data["code"], data["partial_message"]) == (
+            "error",
+            "CONVERSATION_NOT_FOUND",
+            None,
+        )
+    else:
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "CONVERSATION_NOT_FOUND"
+    assert [m.role for m in _stored(session_factory)] == ["user"]

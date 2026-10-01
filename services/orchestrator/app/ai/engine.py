@@ -33,7 +33,7 @@ from app.ai.errors import AiError
 from app.ai.providers.base import Done, GenerationRequest, Message, ModelProvider, TextDelta
 from app.ai.providers.registry import ProviderRegistry
 from app.audit import recorder
-from app.conversations.store import ConversationStore
+from app.conversations.store import ConversationNotFoundError, ConversationStore
 from app.core.config import Settings
 from app.core.redaction import Redactor
 from app.db.models import MessageRole, MessageRow, MessageStatus
@@ -76,7 +76,12 @@ class Failed:
     partial_message: MessageRow | None
 
 
-EngineEvent = Delta | Finished | Failed
+@dataclass(frozen=True)
+class Abandoned:
+    """The conversation was deleted mid-turn: the reply was discarded, the turn audited."""
+
+
+EngineEvent = Delta | Finished | Failed | Abandoned
 
 
 class ChatEngine:
@@ -192,18 +197,26 @@ class ChatEngine:
         text = "".join(emitted)
         if failure is None and not text.strip():
             failure = AiError("invalid_response")
-        message = await asyncio.to_thread(self._finish, turn, text, done, started, failure)
-        if failure is not None:
+        message, abandoned = await asyncio.to_thread(
+            self._finish, turn, text, done, started, failure
+        )
+        if abandoned:
+            yield Abandoned()
+        elif failure is not None:
             yield Failed(failure, message)
         else:
             yield Finished(message)
 
     async def run_to_completion(self, turn: PreparedTurn) -> MessageRow:
+        """The stored reply. Raises AiError, or ConversationNotFoundError if the
+        conversation was deleted mid-turn."""
         async for event in self.run(turn):
             if isinstance(event, Finished):
                 return event.message
             if isinstance(event, Failed):
                 raise event.error
+            if isinstance(event, Abandoned):
+                raise ConversationNotFoundError(turn.conversation_id)
         raise AiError("invalid_response")
 
     async def _next(self, events: AsyncIterator) -> object | None:
@@ -239,26 +252,37 @@ class ChatEngine:
         done: Done,
         started: float,
         failure: AiError | None,
-    ) -> MessageRow | None:
+    ) -> tuple[MessageRow | None, bool]:
         """Store the reply (partial text as incomplete), release the turn lease, audit
-        the turn and log a trace, all in one transaction."""
+        the turn and log a trace, all in one transaction. Returns the stored reply and
+        whether the turn was abandoned because the conversation was deleted mid-turn;
+        then the reply is discarded but the turn is still audited, and nothing raises."""
         config = turn.provider.config
         latency_ms = round((time.perf_counter() - started) * 1000)
         with self._session_factory() as session:
             store = ConversationStore(session, turn.principal_id, turn.correlation_id)
             store.release_turn(turn.conversation_id, turn.turn_id)
             message = None
+            abandoned = False
             if text.strip():
-                message = store.append(
-                    turn.conversation_id,
-                    MessageRole.ASSISTANT,
-                    text,
-                    status=MessageStatus.COMPLETE if failure is None else MessageStatus.INCOMPLETE,
-                    provider=config.name,
-                    model=config.model,
-                    input_tokens=done.input_tokens or None,
-                    output_tokens=done.output_tokens or None,
-                )
+                try:
+                    message = store.append(
+                        turn.conversation_id,
+                        MessageRole.ASSISTANT,
+                        text,
+                        status=(
+                            MessageStatus.COMPLETE if failure is None else MessageStatus.INCOMPLETE
+                        ),
+                        provider=config.name,
+                        model=config.model,
+                        input_tokens=done.input_tokens or None,
+                        output_tokens=done.output_tokens or None,
+                    )
+                except ConversationNotFoundError:
+                    abandoned = True
+            error = failure.api_code if failure else None
+            if abandoned:
+                error = "CONVERSATION_DELETED"
             details = {
                 "provider": config.name,
                 "model": config.model,
@@ -269,7 +293,7 @@ class ChatEngine:
                 "memory_ids": list(turn.memory_ids),
                 "user_message_id": turn.user_message.message_id,
                 "assistant_message_id": message.message_id if message else None,
-                "error": failure.api_code if failure else None,
+                "error": error,
             }
             recorder.record(
                 session,
@@ -281,21 +305,25 @@ class ChatEngine:
                         "action": "chat.turn",
                         "resource_type": "conversation",
                         "resource_id": turn.conversation_id,
-                        "outcome": AuditOutcome.FAILED if failure else AuditOutcome.EXECUTED,
+                        "outcome": AuditOutcome.FAILED if error else AuditOutcome.EXECUTED,
                         "correlation_id": turn.correlation_id,
                         "details": details,
                     }
                 ),
             )
             session.commit()
+        if abandoned:
+            event = "chat_turn_abandoned"
+        else:
+            event = "chat_turn_completed" if failure is None else "chat_turn_failed"
         logger.info(
-            "chat_turn_completed" if failure is None else "chat_turn_failed",
+            event,
             conversation_id=turn.conversation_id,
             provider_request_id=done.request_id,
             **{key: value for key, value in details.items() if key != "memory_ids"},
             memory_count=len(turn.memory_ids),
         )
-        return message
+        return message, abandoned
 
 
 async def _close(events: AsyncIterator) -> None:
