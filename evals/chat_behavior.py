@@ -1,6 +1,11 @@
 """Chat behavior eval: runs datasets/chat_behavior.jsonl through the orchestrator's
-real request path (context builder, build_request, provider stream, stream redactor)
-and scores each reply with deterministic substring and regex checks.
+request assembly (app.ai.context.build_turn_request, the same function ChatEngine
+uses), the configured provider and the stream redactor, then scores each reply with
+deterministic substring and regex checks. It skips the database parts of a turn
+(retrieval, history, storage, audit): memory and history come from the dataset.
+
+This file imports orchestrator internals, the one sanctioned exception to ADR 0006
+(see the ADR's addendum).
 
 Paid: it calls the configured provider (ANTHROPIC_API_KEY from the root .env by
 default). Run from services/orchestrator so the service's settings and deps apply:
@@ -27,11 +32,10 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DATASET = REPO_ROOT / "evals" / "datasets" / "chat_behavior.jsonl"
 sys.path.insert(0, str(REPO_ROOT / "services" / "orchestrator"))
 
-from app.ai.context import RequestLimits, build_request  # noqa: E402
+from app.ai.context import RequestLimits, build_turn_request  # noqa: E402
 from app.ai.errors import AiError  # noqa: E402
 from app.ai.providers.base import Done, Message, ModelProvider, TextDelta  # noqa: E402
 from app.core.redaction import Redactor  # noqa: E402
-from app.memory.context_builder import build_memory_context  # noqa: E402
 from greenloop_contracts import MemoryRecord  # noqa: E402
 
 PASS_THRESHOLD = 0.85
@@ -131,11 +135,15 @@ async def run_case(
     done = Done()
     started = time.perf_counter()
     try:
-        memory = build_memory_context(case.memory, principal_id=PRINCIPAL_ID, redactor=redactor)
-        request = build_request(
-            memory, case.history, case.user_message, redactor=redactor, limits=limits
+        assembled = build_turn_request(
+            case.memory,
+            case.history,
+            case.user_message,
+            principal_id=PRINCIPAL_ID,
+            redactor=redactor,
+            limits=limits,
         )
-        async for event in provider.stream(request):
+        async for event in provider.stream(assembled.request):
             if isinstance(event, TextDelta):
                 parts.append(redacting.feed(event.text))
             elif isinstance(event, Done):

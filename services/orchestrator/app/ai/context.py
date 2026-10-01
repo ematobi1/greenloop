@@ -7,14 +7,15 @@ server. Prompt wording lives in prompts.py.
 """
 
 import math
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 
 from app.ai.errors import AiError
 from app.ai.prompts import MEMORY_PREAMBLE, NO_MEMORY_NOTE, SYSTEM_PROMPT
 from app.ai.providers.base import GenerationRequest, Message
 from app.core.redaction import Redactor
-from app.memory.context_builder import MemoryContext
+from app.memory.context_builder import MemoryContext, build_memory_context
+from greenloop_contracts import MemoryRecord
 
 CHARS_PER_TOKEN = 4
 
@@ -28,6 +29,30 @@ class RequestLimits:
 def estimate_tokens(text: str) -> int:
     """A conservative character-based estimate; exact counts come back in usage."""
     return math.ceil(len(text) / CHARS_PER_TOKEN)
+
+
+@dataclass(frozen=True)
+class TurnRequest:
+    request: GenerationRequest
+    memory_ids: tuple[str, ...]
+
+
+def build_turn_request(
+    records: Iterable[MemoryRecord],
+    history: Sequence[Message],
+    user_message: str,
+    *,
+    principal_id: str,
+    redactor: Redactor,
+    limits: RequestLimits,
+) -> TurnRequest:
+    """The database-free part of a chat turn: retrieved records through the context
+    builder, then system prompt, history and user message into one request. The
+    engine and evals/chat_behavior.py both call this, so the eval can't drift from
+    production request assembly."""
+    memory = build_memory_context(records, principal_id=principal_id, redactor=redactor)
+    request = build_request(memory, history, user_message, redactor=redactor, limits=limits)
+    return TurnRequest(request=request, memory_ids=memory.included_ids)
 
 
 def build_system_prompt(memory: MemoryContext) -> str:

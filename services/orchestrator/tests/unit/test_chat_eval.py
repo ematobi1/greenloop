@@ -255,3 +255,41 @@ def test_rescore_of_an_incomplete_report_exits_nonzero(tmp_path, capsys):
     )
     assert chat_eval.main(["--rescore", str(report)]) == 1
     assert "not scored (fails the run)" in capsys.readouterr().out
+
+
+def test_the_eval_and_the_engine_assemble_requests_with_the_same_function(
+    monkeypatch, session_factory
+):
+    """The eval must not drift from production: both go through build_turn_request."""
+    from app.ai import context as context_module
+    from app.ai import engine as engine_module
+    from app.ai.engine import ChatEngine
+    from app.ai.providers.registry import ProviderRegistry
+    from app.conversations.store import ConversationStore
+    from app.core.config import Settings
+    from app.db.models import PrincipalRow
+
+    calls = []
+    real = context_module.build_turn_request
+
+    def spy(*args, **kwargs):
+        calls.append(kwargs.get("principal_id"))
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(context_module, "build_turn_request", spy)
+    monkeypatch.setattr(engine_module, "build_turn_request", spy)
+    monkeypatch.setattr(chat_eval, "build_turn_request", spy)
+
+    asyncio.run(chat_eval.run_case(CASES[0], FakeProvider(["ok"]), Redactor(), LIMITS))
+    with session_factory() as session:
+        session.add(PrincipalRow(principal_id="user-1", display_name="User"))
+        conversation_id = ConversationStore(session, "user-1", "req").create("C").conversation_id
+        session.commit()
+    engine = ChatEngine(
+        session_factory,
+        ProviderRegistry({"fake": FakeProvider()}, "fake"),
+        Redactor(),
+        Settings(_env_file=None),
+    )
+    engine.prepare("user-1", conversation_id, "hi", "req")
+    assert calls == [chat_eval.PRINCIPAL_ID, "user-1"]

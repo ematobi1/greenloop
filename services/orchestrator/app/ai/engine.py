@@ -30,7 +30,7 @@ from dataclasses import dataclass
 import structlog
 from sqlalchemy.orm import Session, sessionmaker
 
-from app.ai.context import RequestLimits, build_request
+from app.ai.context import RequestLimits, build_turn_request
 from app.ai.errors import AiError
 from app.ai.providers.base import Done, GenerationRequest, Message, ModelProvider, TextDelta
 from app.ai.providers.registry import ProviderRegistry
@@ -40,7 +40,6 @@ from app.core.config import Settings
 from app.core.redaction import Redactor
 from app.db.models import MessageRole, MessageRow, MessageStatus
 from app.memory import retrieval
-from app.memory.context_builder import build_memory_context
 from greenloop_contracts import AuditOutcome, AuditRecord
 
 logger = structlog.get_logger(__name__)
@@ -136,13 +135,11 @@ class ChatEngine:
                 limit=settings.ai_memory_record_limit,
                 correlation_id=correlation_id,
             )
-            memory = build_memory_context(
-                records, principal_id=principal_id, redactor=self._redactor
-            )
-            request = build_request(
-                memory,
+            assembled = build_turn_request(
+                records,
                 history,
                 content,
+                principal_id=principal_id,
                 redactor=self._redactor,
                 limits=RequestLimits(
                     context_token_limit=settings.ai_context_token_limit,
@@ -158,9 +155,9 @@ class ChatEngine:
             turn_id=turn_id,
             lease_started=lease_started,
             provider=provider,
-            request=request,
+            request=assembled.request,
             user_message=user_message,
-            memory_ids=memory.included_ids,
+            memory_ids=assembled.memory_ids,
         )
 
     async def run(self, turn: PreparedTurn) -> AsyncIterator[EngineEvent]:
