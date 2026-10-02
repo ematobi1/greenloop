@@ -77,7 +77,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 4. **Reasoning** (`orchestration/reasoning.py`) interprets the request.
 5. **Planning** (`orchestration/planner.py`) drafts a plan of steps as `Task` contracts.
 6. **Memory retrieval** (`memory/retrieval.py`) fetches relevant records. They pass through `memory/context_builder.py` before any prompt sees them.
-7. **Agent dispatch** (`orchestration/dispatcher.py`) sends each step to an agent as a `Dispatch`.
+7. **Agent dispatch** (`orchestration/dispatcher.py`) runs a step on an agent as a `Dispatch`. Today only `POST /v1/dispatches` calls it; the planner will in phase 4.
 8. **Permission check** (`permissions/policy.py`) evaluates the requested `ToolPermission`.
 9. **Approval if needed** (`permissions/approvals.py`) asks a human and binds the approval to the SHA256 of the exact operation.
 10. **Broker** (`tools/broker_client.py` to `services/broker`) re-checks policy, consumes the approval once, writes the ledger entry and forwards the call.
@@ -131,13 +131,13 @@ This document maps every folder to its role, owning component and roadmap phase.
 | Module | Role | Phase |
 |---|---|---|
 | `main.py` | FastAPI app factory and router wiring | 1 |
-| `api/v1/` | REST endpoints: health, chat, memory, plans, agents, approvals, audit | 1 (health), 2 |
+| `api/v1/` | REST endpoints: health, chat, memory, plans, agents, dispatches, approvals, audit | 1 (health), 2 |
 | `core/` | Config from environment, auth, logging, errors | 1 (config), 2 (auth) |
 | `ai/` | Streaming chat engine, system prompts, request assembly (`context.py`), model providers (Anthropic default, Ollama optional), AI error codes | 2 |
 | `conversations/` | Owner-scoped conversations, ordered write-once messages, the per-conversation turn lease | 2 |
-| `orchestration/` | Reasoning, planner, dispatcher | 2 (reasoning, planner), 4 (dispatcher) |
-| `memory/` | Store, retrieval, context builder, provenance, embeddings | 1 (context builder), 2 |
-| `agents/` | Agent base, registry, planner, research and coding agents | 4 |
+| `orchestration/` | Reasoning, planner, dispatcher (runs one `Dispatch` on one agent, records execution memory and audit) | 2 (reasoning, planner), 4 (dispatcher) |
+| `memory/` | Store, retrieval, context builder, provenance, execution memory, embeddings | 1 (context builder), 2 |
+| `agents/` | Agent base, in-code registry, deterministic reference agents; planner, research and coding agents (stubs) | 4 |
 | `permissions/` | Policy evaluation and approval requests | 3 |
 | `tools/` | Tool registry and broker client | 3 |
 | `workflows/` | Workflow engine and queue | 4 |

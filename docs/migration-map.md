@@ -35,9 +35,10 @@ Ported from branch `feature/unified-contracts` at `0eabefb`. Changes are recorde
 | `error-report.schema.json` | `ErrorReport` and `ErrorDetail` | ported |
 | `audit-record.schema.json` | `AuditRecord` | ported |
 | `contracts/tests/test_contracts.py` | `packages/contracts/tests/` (rewritten for Pydantic; the Phase 1 compatibility and mislabeling-documentation tests dropped) | ported |
-| `approval`, `approval-list`, `conversation`, `conversation-list`, `error`, `health` schemas | response models in `services/orchestrator/app/api/v1` | deferred to orchestrator port |
+| `conversation`, `conversation-list`, `error`, `health` schemas | response models in `services/orchestrator/app/api/v1` | ported |
+| `approval`, `approval-list` schemas | `Approval` contract in contracts 0.3.0 (ADR 0009) | PR5b, not started |
 | `services/memory-store` | `services/orchestrator/app/memory` | deferred to orchestrator port |
-| `services/agent-registry` | `services/orchestrator/app/agents` | deferred to orchestrator port |
+| `services/agent-registry` | `services/orchestrator/app/agents` (registry, reference agents) | ported (PR5a) |
 | `services/backend`, `services/frontend` | compare with greenloop-canonical-orchestrator before deciding | deferred to orchestrator port |
 
 ## greenloop-canonical-orchestrator detail
@@ -49,8 +50,9 @@ Source: branch `feature/canonical-orchestrator` at `69628c9`. Decisions are reco
 | 1 | Core platform: single Redactor, structured logging, errors, request id, Host allowlist, CORS | ported |
 | 2 | Postgres baseline, token auth to principals, audit records, `/v1/health` readiness | ported |
 | 3 | Append-only memory store on Postgres | ported |
-| 4 | Conversations (soft delete, write-once messages), streaming AI engine (JSON and SSE), Anthropic and Ollama providers, prompts, chat behavior eval (`evals/chat_behavior.py`) | ported on `feature/port-conversations-ai`, not merged. Paid runs so far: baseline 26/29, after-run 27/30 (30/30 when its saved replies are rescored on the corrected checks). Still pending: a fresh after-run on the corrected checks and a 1-call thinking smoke test, then checkpoint 3. Tracked issues M9–M11 (`.dev-loop/issues/`); M10, no per-principal rate or cost limit, blocks any non-local deployment |
-| 5 | Agents, dispatch, execution memory, approvals API | not started |
+| 4 | Conversations (soft delete, write-once messages), streaming AI engine (JSON and SSE), Anthropic and Ollama providers, prompts, chat behavior eval (`evals/chat_behavior.py`) | merged (#12). Final paid after-run 30/30. Tracked issues M9–M11 (#9–#11); M10, no per-principal rate or cost limit, blocks any non-local deployment |
+| 5a | Agent registry with two reference agents, `GET /v1/agents`, `POST /v1/dispatches`, private execution memory (ADR 0008) | ported on `feature/port-agents-dispatch`, not merged |
+| 5b | `Approval` contract (contracts 0.3.0), broker Postgres approval store and API, orchestrator `/v1/approvals` forwarding (ADR 0009) | not started |
 
 ## Porting rules
 
