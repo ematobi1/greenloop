@@ -63,6 +63,15 @@ def valid_payloads() -> dict[str, dict[str, Any]]:
             "created_at": T0,
             "updated_at": T0,
         },
+        "ApprovalActor": {"principal_id": "user-1", "kind": "user", "in_dispatch": False},
+        "ApprovalCreateRequest": {
+            "operation": OPERATION,
+            "actor": {"principal_id": "user-1", "kind": "system", "in_dispatch": True},
+        },
+        "ApprovalDecisionRequest": {
+            "approved": True,
+            "actor": {"principal_id": "user-1", "kind": "user", "in_dispatch": False},
+        },
         "ToolGrant": {
             "grant_id": "grant-1",
             "principal_id": "user-1",
