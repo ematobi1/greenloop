@@ -7,7 +7,7 @@ from sqlalchemy import select
 from app.agents import registry as registry_module
 from app.agents.base import BaseAgent
 from app.audit import recorder
-from app.db.models import AuditRecordRow, MemoryRecordRow
+from app.db.models import AuditRecordRow, MemoryRecordRow, PrincipalRole
 from app.memory import execution
 from app.orchestration import dispatcher
 from greenloop_contracts import Agent, AgentDomain, AgentStatus, ExecutionResult
@@ -310,8 +310,8 @@ def test_a_dispatch_the_permission_check_refuses_is_403_audited_and_never_runs(
     _ToolAgent.ran = False
     seen = []
 
-    def deny(principal_id, agent):
-        seen.append((principal_id, agent.agent_id))
+    def deny(principal, agent):
+        seen.append((principal.principal_id, agent.agent_id))
         return False
 
     registry = registry_module.AgentRegistry(permission_check=deny)
@@ -327,3 +327,23 @@ def test_a_dispatch_the_permission_check_refuses_is_403_audited_and_never_runs(
     [audit] = _audits(session_factory)
     assert (audit.outcome, audit.resource_id) == ("denied", "tool-agent")
     assert audit.details == {"reason": "permission_denied"}
+
+
+def test_with_the_real_check_a_user_cannot_dispatch_a_tool_agent_but_a_system_principal_can(
+    client, issue_token, session_factory
+):
+    _ToolAgent.ran = False
+    registry = registry_module.build_agent_registry()
+    registry.register(_ToolAgent())
+    client.app.state.agent_registry = registry
+    user = {"Authorization": f"Bearer {issue_token('user-1')}"}
+    system = {"Authorization": f"Bearer {issue_token('svc-1', PrincipalRole.SYSTEM)}"}
+
+    refused = _dispatch(client, user, agent_id="tool-agent")
+    assert refused.status_code == 403
+    assert not _ToolAgent.ran
+
+    allowed = _dispatch(client, system, agent_id="tool-agent")
+    assert allowed.status_code == 200
+    assert _ToolAgent.ran
+    assert allowed.json()["error"]["code"] == "AGENT_FAILED"

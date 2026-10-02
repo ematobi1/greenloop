@@ -32,6 +32,7 @@ from sqlalchemy.orm import Session
 from app.agents.base import BaseAgent, result_id
 from app.agents.registry import AgentRegistry, UnknownAgentError
 from app.audit import recorder
+from app.core.auth import Principal
 from app.memory.execution import ExecutionMemoryStatus, record_execution
 from greenloop_contracts import (
     AgentStatus,
@@ -163,13 +164,14 @@ async def dispatch(
     registry: AgentRegistry,
     session_factory: Callable[[], Session],
     *,
-    principal_id: str,
+    principal: Principal,
     correlation_id: str,
     agent_id: str,
     task_id: str,
     inputs: dict[str, JsonValue],
     timeout_ms: int | None,
 ) -> DispatchOutcome:
+    principal_id = principal.principal_id
     try:
         agent = registry.get(agent_id)
     except UnknownAgentError:
@@ -188,7 +190,7 @@ async def dispatch(
             f"agent_{status.value}",
         )
         raise AgentNotActiveError(audited)
-    if not registry.may_dispatch(principal_id, agent):
+    if not registry.may_dispatch(principal, agent):
         audited = await asyncio.to_thread(
             record_refusal,
             session_factory,
