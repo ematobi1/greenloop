@@ -19,10 +19,14 @@ by the store's clock at the moment of use. Status and timestamps must agree:
 | consumed | present                 | present     |
 
 and created_at <= decided_at <= consumed_at < expires_at, with decided_at also before
-expires_at and updated_at no earlier than any of them.
+expires_at and updated_at no earlier than any of them. `created_at` and `updated_at`
+are required: a default of now would rewrite history when a stored row is rebuilt.
+
+Change an approval only through `decide` and `consume`, which re-validate.
+`model_copy(update=...)` skips validation and must never be used to change one.
 """
 
-from datetime import timedelta
+from datetime import datetime, timedelta
 from enum import StrEnum
 
 from pydantic import model_validator
@@ -32,7 +36,6 @@ from greenloop_contracts.base import (
     Identifier,
     SafeMessage,
     Sha256Hex,
-    Timestamp,
     UtcDatetime,
 )
 from greenloop_contracts.operation import operation_hash
@@ -62,8 +65,26 @@ class Approval(ContractModel):
     decided_at: UtcDatetime | None = None
     consumed_at: UtcDatetime | None = None
     expires_at: UtcDatetime
-    created_at: Timestamp
-    updated_at: Timestamp
+    created_at: UtcDatetime
+    updated_at: UtcDatetime
+
+    def decide(self, *, approved: bool, decided_by: str, at: datetime) -> "Approval":
+        """A pending approval, decided. Raises ValueError (ValidationError) when the
+        result breaks a rule, for example a decision by someone other than the owner."""
+        if self.status is not ApprovalStatus.PENDING:
+            raise ValueError(f"only a pending approval can be decided, not a {self.status} one")
+        status = ApprovalStatus.APPROVED if approved else ApprovalStatus.REJECTED
+        return self._changed(status=status, decided_by=decided_by, decided_at=at, updated_at=at)
+
+    def consume(self, *, at: datetime) -> "Approval":
+        """An approved approval, consumed. The store's single-statement consume is the
+        authority; this keeps the returned contract value consistent with it."""
+        if self.status is not ApprovalStatus.APPROVED:
+            raise ValueError(f"only an approved approval can be consumed, not a {self.status} one")
+        return self._changed(status=ApprovalStatus.CONSUMED, consumed_at=at, updated_at=at)
+
+    def _changed(self, **changes: object) -> "Approval":
+        return Approval.model_validate({**self.model_dump(), **changes})
 
     @model_validator(mode="after")
     def _consistent(self) -> "Approval":

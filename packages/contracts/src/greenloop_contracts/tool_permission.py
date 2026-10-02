@@ -43,7 +43,9 @@ class ToolPermission(ContractModel):
         try:
             text = json.dumps(arguments, ensure_ascii=False, allow_nan=False)
         except ValueError:
-            raise ValueError("arguments must be JSON without NaN or Infinity") from None
+            raise ValueError(
+                "arguments must be strict JSON: no NaN, Infinity, or integer over 4300 digits"
+            ) from None
         if len(text.encode("utf-8")) > MAX_ARGUMENT_BYTES:
             raise ValueError(f"arguments must be at most {MAX_ARGUMENT_BYTES} bytes as JSON")
         return arguments
