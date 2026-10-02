@@ -52,8 +52,8 @@ Source: branch `feature/canonical-orchestrator` at `69628c9`. Decisions are reco
 | 3 | Append-only memory store on Postgres | ported |
 | 4 | Conversations (soft delete, write-once messages), streaming AI engine (JSON and SSE), Anthropic and Ollama providers, prompts, chat behavior eval (`evals/chat_behavior.py`) | merged (#12). Final paid after-run 30/30. Tracked issues M9–M11 (#9–#11); M10, no per-principal rate or cost limit, blocks any non-local deployment |
 | 5a | Agent registry with two reference agents, `GET /v1/agents`, `POST /v1/dispatches`, private execution memory (ADR 0008) | merged (#13) |
-| 5b-1 | Contracts 0.3.0 (`Approval`, `Agent.model_access`, shared `operation_hash`), system-only dispatch permission for agents with model or tool access | on `feature/port-approvals-contracts`, not merged |
-| 5b-2 | Broker Postgres roles, schema and approval store, service token, broker and orchestrator approvals APIs (ADR 0009) | not started |
+| 5b-1 | Contracts 0.3.0 (`Approval`, `Agent.model_access`, shared `operation_hash`), system-only dispatch permission for agents with model or tool access | merged (#15) |
+| 5b-2 | Per-service Postgres roles and schemas, broker approval store and append-only audit, service tokens, contracts 0.4.0 request bodies, broker and orchestrator approvals APIs, broker port unpublished (ADR 0009) | on `feature/port-approvals-broker`, not merged |
 
 ## Porting rules
 

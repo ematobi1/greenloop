@@ -48,7 +48,7 @@ This document maps every folder to its role, owning component and roadmap phase.
                     +---------------------------------+-----+
                     |  services/broker                      |
                     |  policy (deny by default)             |
-                    |  approval_binding (SHA256, one use)   |
+                    |  approvals (Postgres, SHA256, 1 use)  |
                     |  ledger (append-only audit)           |
                     |  mcp_proxy                            |
                     +------------------+--------------------+
@@ -60,7 +60,9 @@ This document maps every folder to its role, owning component and roadmap phase.
                     |  postgres-readonly, google-workspace  |
                     +---------------------------------------+
 
-  Postgres 16 + pgvector:  memory, audit, conversations and messages, approvals, workflows
+  Postgres 16 + pgvector:  memory, audit, conversations and messages, workflows (schema public,
+                           role greenloop_orchestrator); approvals, broker audit, service tokens
+                           (schema broker, role greenloop_broker). See docs/database-roles.md
 
   Chat today goes api/v1/chat -> ai/engine directly (conversations/ holds the
   transcript and the one-turn-at-a-time lease); orchestration/reasoning and the
@@ -79,7 +81,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 6. **Memory retrieval** (`memory/retrieval.py`) fetches relevant records. They pass through `memory/context_builder.py` before any prompt sees them.
 7. **Agent dispatch** (`orchestration/dispatcher.py`) runs a step on an agent as a `Dispatch`. Today only `POST /v1/dispatches` calls it; the planner will in phase 4.
 8. **Permission check** (`permissions/policy.py`) evaluates the requested `ToolPermission`.
-9. **Approval if needed** (`permissions/approvals.py`) asks a human and binds the approval to the SHA256 of the exact operation.
+9. **Approval if needed** (`permissions/approvals.py`) asks the broker for an approval bound to the SHA256 of the exact operation; only the owning human user, outside any dispatch, can decide it (ADR 0009).
 10. **Broker** (`tools/broker_client.py` to `services/broker`) re-checks policy, consumes the approval once, writes the ledger entry and forwards the call.
 11. **MCP tool servers** execute the operation.
 12. **Result validation** checks the `ExecutionResult` against what the step expected.
