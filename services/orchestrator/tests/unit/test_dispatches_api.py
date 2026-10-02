@@ -283,3 +283,47 @@ def test_inputs_must_be_strict_json(client, auth, session_factory, raw_inputs):
 def test_eighteen_digit_integers_and_booleans_are_accepted(client, auth):
     inputs = {"n": -(10**18 - 1), "flag": True}
     assert _dispatch(client, auth, inputs=inputs).json()["output"] == {"echo": inputs}
+
+
+class _ToolAgent(BaseAgent):
+    descriptor = Agent(
+        agent_id="tool-agent",
+        name="Tool",
+        domain=AgentDomain.OTHER,
+        version="1",
+        capabilities=("x",),
+        allowed_tools=("github.open_pr",),
+        status=AgentStatus.ACTIVE,
+        created_at=datetime(2026, 1, 1, tzinfo=UTC),
+        updated_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+    ran = False
+
+    async def run(self, item):
+        _ToolAgent.ran = True
+        raise AssertionError("a forbidden dispatch must not run")
+
+
+def test_a_dispatch_the_permission_check_refuses_is_403_audited_and_never_runs(
+    client, auth, session_factory
+):
+    _ToolAgent.ran = False
+    seen = []
+
+    def deny(principal_id, agent):
+        seen.append((principal_id, agent.agent_id))
+        return False
+
+    registry = registry_module.AgentRegistry(permission_check=deny)
+    registry.register(_ToolAgent())
+    client.app.state.agent_registry = registry
+
+    response = _dispatch(client, auth, agent_id="tool-agent")
+
+    assert response.status_code == 403
+    assert response.json()["error"]["code"] == "DISPATCH_FORBIDDEN"
+    assert seen == [("user-1", "tool-agent")]
+    assert not _ToolAgent.ran
+    [audit] = _audits(session_factory)
+    assert (audit.outcome, audit.resource_id) == ("denied", "tool-agent")
+    assert audit.details == {"reason": "permission_denied"}

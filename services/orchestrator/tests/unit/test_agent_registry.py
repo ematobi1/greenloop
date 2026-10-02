@@ -4,7 +4,12 @@ from datetime import UTC, datetime
 import pytest
 
 from app.agents.reference import EchoReferenceAgent, FailingReferenceAgent
-from app.agents.registry import AgentRegistry, UnknownAgentError, build_agent_registry
+from app.agents.registry import (
+    AgentRegistrationError,
+    AgentRegistry,
+    UnknownAgentError,
+    build_agent_registry,
+)
 from greenloop_contracts import AgentDomain, AgentStatus, Dispatch, ExecutionStatus
 
 
@@ -58,3 +63,38 @@ def test_the_failing_agent_fails_with_a_user_safe_error():
     assert result.status is ExecutionStatus.FAILED
     assert result.error.code == "REFERENCE_AGENT_FAILED"
     assert result.output is None
+
+
+class _ToolUsingAgent(EchoReferenceAgent):
+    descriptor = EchoReferenceAgent.descriptor.model_copy(
+        update={"agent_id": "tool-agent", "allowed_tools": ("github.open_pr",)}
+    )
+
+
+def test_an_agent_with_tool_access_is_refused_without_a_dispatch_permission_check():
+    registry = AgentRegistry()
+    with pytest.raises(AgentRegistrationError, match="declares tool access") as raised:
+        registry.register(_ToolUsingAgent())
+    assert "github.open_pr" in str(raised.value)
+    assert "PR5b" in str(raised.value)
+    with pytest.raises(UnknownAgentError):
+        registry.get("tool-agent")
+
+
+def test_an_agent_with_tool_access_registers_once_a_permission_check_exists():
+    registry = AgentRegistry(permission_check=lambda principal_id, agent: False)
+    registry.register(_ToolUsingAgent())
+    assert registry.get("tool-agent").descriptor.allowed_tools == ("github.open_pr",)
+
+
+def test_no_registered_agent_declares_tool_access_today():
+    assert all(not agent.allowed_tools for agent in build_agent_registry().list())
+
+
+def test_may_dispatch_defers_to_the_check_when_one_exists():
+    allowed = AgentRegistry(permission_check=lambda principal_id, agent: principal_id == "owner")
+    allowed.register(_ToolUsingAgent())
+    agent = allowed.get("tool-agent")
+    assert allowed.may_dispatch("owner", agent)
+    assert not allowed.may_dispatch("someone-else", agent)
+    assert build_agent_registry().may_dispatch("anyone", EchoReferenceAgent())

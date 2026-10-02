@@ -1,7 +1,7 @@
 """Dispatcher: run one Dispatch on one agent and record what happened.
 
 `dispatch` is the single entry point (the API and, later, the planner): it resolves
-the agent, refuses unknown and inactive ones with an audit entry, builds the Dispatch
+the agent, refuses unknown, inactive and not-permitted ones with an audit entry, builds the Dispatch
 server-side, runs it and records it. Tool use inside an agent still goes permission
 check, approval, broker, audit.
 
@@ -69,6 +69,10 @@ class AgentNotFoundError(DispatchRefusedError):
 
 
 class AgentNotActiveError(DispatchRefusedError):
+    pass
+
+
+class DispatchForbiddenError(DispatchRefusedError):
     pass
 
 
@@ -184,6 +188,16 @@ async def dispatch(
             f"agent_{status.value}",
         )
         raise AgentNotActiveError(audited)
+    if not registry.may_dispatch(principal_id, agent):
+        audited = await asyncio.to_thread(
+            record_refusal,
+            session_factory,
+            principal_id,
+            correlation_id,
+            agent_id,
+            "permission_denied",
+        )
+        raise DispatchForbiddenError(audited)
 
     item = Dispatch(
         dispatch_id=new_dispatch_id(),
