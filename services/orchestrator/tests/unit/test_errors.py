@@ -33,6 +33,8 @@ BUILT_ROUTES = {
     ("DELETE", "/v1/conversations/x-1"),
     ("GET", "/v1/conversations/x-1/messages"),
     ("POST", "/v1/conversations/x-1/messages"),
+    ("GET", "/v1/agents"),
+    ("GET", "/v1/agents/x-1"),
 }
 V1_ROUTES = _v1_routes()
 UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
