@@ -13,14 +13,20 @@ default). Run from services/orchestrator so the service's settings and deps appl
     python ../../evals/chat_behavior.py [--provider NAME] [--limit N] [--out report.jsonl]
     python ../../evals/chat_behavior.py --rescore report.jsonl   # free: saved replies
 
+Every paid run also writes evals/results/<UTC date>-<short commit>[-N].json (no reply
+text); --rescore makes no model calls and writes nothing.
+
 Pass rule: every case in SAFETY_CATEGORIES passes, and at least PASS_THRESHOLD of all
 cases pass. Exit code 0 on pass, 1 on fail, 2 when no provider is configured.
 """
 
 import argparse
 import asyncio
+import itertools
 import json
 import re
+import shutil
+import subprocess
 import sys
 import time
 from collections.abc import Sequence
@@ -30,6 +36,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DATASET = REPO_ROOT / "evals" / "datasets" / "chat_behavior.jsonl"
+RESULTS_DIR = REPO_ROOT / "evals" / "results"
 sys.path.insert(0, str(REPO_ROOT / "services" / "orchestrator"))
 
 from app.ai.context import RequestLimits, build_turn_request  # noqa: E402
@@ -266,6 +273,77 @@ def _summary(results: list[CaseResult], outcome: Verdict, label: str) -> str:
     return "\n".join(lines)
 
 
+def results_summary(
+    results: list[CaseResult],
+    outcome: Verdict,
+    *,
+    provider: str,
+    model: str,
+    commit: str,
+    dirty: bool,
+    now: datetime,
+) -> dict:
+    """The committed record of one paid run. Ids, categories, verdicts and counts only:
+    no reply text, prompts, memory or failure strings (those quote check text, and the
+    redaction cases' checks hold fake secret patterns)."""
+    return {
+        "date": now.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "commit": commit,
+        "dirty": dirty,
+        "provider": provider,
+        "model": model,
+        "pass_rate": round(outcome.pass_rate, 4),
+        "threshold": PASS_THRESHOLD,
+        "passed": outcome.passed,
+        "safety_gate": {"passed": not outcome.failed_safety, "failed": list(outcome.failed_safety)},
+        "not_scored": list(outcome.missing),
+        "tokens": {
+            "input": sum(r.input_tokens for r in results),
+            "output": sum(r.output_tokens for r in results),
+        },
+        "cases": [
+            {"id": r.id, "category": r.category, "passed": r.passed, "error": r.error}
+            for r in results
+        ],
+    }
+
+
+def write_results(summary: dict, directory: Path = RESULTS_DIR) -> Path:
+    """Writes evals/results/<UTC date>-<short commit>.json, adding -2, -3, ... for later
+    runs on the same day and commit. Never overwrites an earlier run."""
+    directory.mkdir(parents=True, exist_ok=True)
+    stem = f"{summary['date'][:10]}-{summary['commit']}"
+    text = json.dumps(summary, indent=2) + "\n"
+    for attempt in itertools.count(1):
+        path = directory / (f"{stem}.json" if attempt == 1 else f"{stem}-{attempt}.json")
+        try:
+            with path.open("x", encoding="utf-8") as file:
+                file.write(text)
+        except FileExistsError:
+            continue
+        return path
+    raise AssertionError("unreachable")
+
+
+def git_state() -> tuple[str, bool]:
+    """Short commit and whether the working tree has uncommitted changes."""
+
+    executable = shutil.which("git")
+    if executable is None:
+        return "unknown", True
+
+    def git(*args: str) -> str:
+        # Fixed arguments from this module only; nothing from input reaches the command.
+        return subprocess.run(  # noqa: S603
+            [executable, *args], cwd=REPO_ROOT, capture_output=True, text=True, check=True
+        ).stdout.strip()
+
+    try:
+        return git("rev-parse", "--short", "HEAD"), bool(git("status", "--porcelain"))
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown", True
+
+
 def main(argv: list[str] | None = None) -> int:
     from app.ai.providers.registry import build_registry
     from app.core.config import get_settings
@@ -303,8 +381,20 @@ def main(argv: list[str] | None = None) -> int:
         args.out.write_text(
             "".join(json.dumps(asdict(r)) + "\n" for r in results), encoding="utf-8"
         )
+    commit, dirty = git_state()
+    summary = results_summary(
+        results,
+        outcome,
+        provider=provider.config.name,
+        model=provider.config.model,
+        commit=commit,
+        dirty=dirty,
+        now=datetime.now(UTC),
+    )
+    saved = write_results(summary, RESULTS_DIR)
     label = f"provider={provider.config.name} model={provider.config.model}"
     print(_summary(results, outcome, label))
+    print(f"results: {saved}")
     return 0 if outcome.passed else 1
 
 
