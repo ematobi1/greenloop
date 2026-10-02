@@ -7,13 +7,13 @@ check, approval, broker, audit.
 
 Once an agent has returned, its result is a fact: nothing after that point may hide
 or change it. `run` turns every agent failure (exception, timeout, a wrong type, a
-result for a different dispatch) into a failed ExecutionResult with a user-safe
-error. A cancelled dispatch (client gone, shutdown) is recorded as cancelled before
-the cancellation propagates. The record runs in a worker thread, so a second
-cancellation can't stop it, but the host must drain the default executor on shutdown
-(uvicorn and asyncio.run do). `record` never raises: it writes the execution memory
-record and the audit entry in one transaction, falls back to the audit entry alone,
-and reports what it managed.
+result for a different dispatch, times outside the observed window) into a failed
+ExecutionResult with a user-safe error. A cancelled dispatch (client gone, shutdown)
+is recorded as cancelled before the cancellation propagates. The record runs in a
+worker thread, so a second cancellation can't stop it, but the host must drain the
+default executor on shutdown (uvicorn and asyncio.run do). `record` never raises: it
+writes the execution memory record and the audit entry in one transaction, falls back
+to the audit entry alone, and reports what it managed.
 
 Agents must not block the event loop: the timeout can only interrupt an agent at an
 `await`.
@@ -121,16 +121,27 @@ async def run(agent: BaseAgent, item: Dispatch) -> ExecutionResult:
     except Exception as err:
         _log_failure(item, err)
         return _failed(item, started_at, "AGENT_FAILED", "The agent failed.")
-    if not isinstance(result, ExecutionResult) or (
-        result.dispatch_id,
-        result.task_id,
-        result.agent_id,
-    ) != (item.dispatch_id, item.task_id, item.agent_id):
+    if (
+        not isinstance(result, ExecutionResult)
+        or (
+            result.dispatch_id,
+            result.task_id,
+            result.agent_id,
+        )
+        != (item.dispatch_id, item.task_id, item.agent_id)
+        or not _within(result, started_at, datetime.now(UTC))
+    ):
         logger.error("agent_result_invalid", agent_id=item.agent_id, dispatch_id=item.dispatch_id)
         return _failed(
             item, started_at, "AGENT_INVALID_RESULT", "The agent returned an invalid result."
         )
     return result
+
+
+def _within(result: ExecutionResult, started_at: datetime, finished_at: datetime) -> bool:
+    """The agent's reported times must fall inside the window the dispatcher observed,
+    since execution memory stores them as verified."""
+    return started_at <= result.started_at <= result.finished_at <= finished_at
 
 
 def _log_failure(item: Dispatch, err: BaseException) -> None:

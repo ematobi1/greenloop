@@ -28,6 +28,7 @@ router = APIRouter(prefix="/dispatches", tags=["dispatches"])
 MAX_INPUT_BYTES = 65_536
 MAX_API_TIMEOUT_MS = 120_000
 """Well below the contract maximum: a dispatch holds its HTTP request open."""
+MAX_INTEGER_DIGITS = 18
 
 _HEADERS = {
     "X-Execution-Memory": {
@@ -52,9 +53,27 @@ class DispatchCreate(BaseModel):
     @field_validator("inputs")
     @classmethod
     def _bounded(cls, inputs: dict[str, JsonValue]) -> dict[str, JsonValue]:
-        if len(json.dumps(inputs, ensure_ascii=False).encode("utf-8")) > MAX_INPUT_BYTES:
+        try:
+            text = json.dumps(inputs, ensure_ascii=False, allow_nan=False)
+        except ValueError:
+            raise ValueError("NaN and Infinity are not valid JSON.") from None
+        if len(text.encode("utf-8")) > MAX_INPUT_BYTES:
             raise ValueError(f"At most {MAX_INPUT_BYTES} bytes as JSON.")
+        if _has_huge_integer(inputs):
+            raise ValueError(f"Integers must fit in {MAX_INTEGER_DIGITS} digits.")
         return inputs
+
+
+def _has_huge_integer(value: JsonValue) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, int):
+        return abs(value) >= 10**MAX_INTEGER_DIGITS
+    if isinstance(value, dict):
+        return any(_has_huge_integer(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_huge_integer(item) for item in value)
+    return False
 
 
 def _refused(error: ApiError, refusal: dispatcher.DispatchRefusedError) -> ApiError:

@@ -265,3 +265,21 @@ def test_the_dispatch_headers_are_documented_in_openapi(client):
         "X-Execution-Memory",
         "X-Audit-Persistence",
     }
+
+
+@pytest.mark.parametrize(
+    "raw_inputs",
+    ['{"x": NaN}', '{"x": Infinity}', '{"x": [1, -Infinity]}', '{"x": ' + "9" * 19 + "}"],
+)
+def test_inputs_must_be_strict_json(client, auth, session_factory, raw_inputs):
+    body = '{"agent_id": "echo-reference-agent", "task_id": "t", "inputs": ' + raw_inputs + "}"
+    response = client.post(
+        "/v1/dispatches", content=body, headers=auth | {"Content-Type": "application/json"}
+    )
+    assert response.status_code == 422
+    assert _audits(session_factory) == []
+
+
+def test_eighteen_digit_integers_and_booleans_are_accepted(client, auth):
+    inputs = {"n": -(10**18 - 1), "flag": True}
+    assert _dispatch(client, auth, inputs=inputs).json()["output"] == {"echo": inputs}

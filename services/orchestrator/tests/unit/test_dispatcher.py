@@ -227,3 +227,22 @@ def test_a_second_cancellation_does_not_lose_the_cancelled_record(session_factor
             select(AuditRecordRow).where(AuditRecordRow.action == "agent.dispatch")
         ).all()
     assert audit.details["status"] == "cancelled"
+
+
+class _FutureAgent(EchoReferenceAgent):
+    async def run(self, item):
+        result = await super().run(item)
+        return result.model_copy(update={"finished_at": datetime(2099, 1, 1, tzinfo=UTC)})
+
+
+class _PastAgent(EchoReferenceAgent):
+    async def run(self, item):
+        result = await super().run(item)
+        return result.model_copy(update={"started_at": datetime(2000, 1, 1, tzinfo=UTC)})
+
+
+@pytest.mark.parametrize("agent", [_FutureAgent(), _PastAgent()])
+def test_times_outside_the_observed_window_are_an_invalid_result(item, agent):
+    result = asyncio.run(dispatcher.run(agent, item))
+    assert result.error.code == "AGENT_INVALID_RESULT"
+    assert result.finished_at.year != 2099
