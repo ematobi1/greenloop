@@ -1,5 +1,20 @@
 # Changelog: greenloop-contracts
 
+## 0.3.0 (2026-10-02)
+
+Adds what PR5b needs: approvals owned by the broker (ADR 0009) and a way for an agent to declare model access.
+
+### Added
+
+- **Approval** (schema v1): a human's permission for one exact `ToolPermission`, used at most once. It carries the operation and its `operation_hash`; the hash must match the operation and the operation must belong to the approval's `principal_id`. `status` is pending, approved, rejected, consumed or expired, and `decided_by`/`decided_at`/`consumed_at` must agree with it. `expires_at` must be after `created_at`; `DEFAULT_APPROVAL_TTL` is 15 minutes.
+- **`canonical_operation` and `operation_hash`** (`operation.py`): the one canonical JSON form (sorted keys, compact, UTF-8, no NaN) and SHA256 of a `ToolPermission`, moved here from the broker so every service computes the same hash. The bytes are unchanged from the broker's previous function and pinned by a test.
+
+### Changed (schema v2 to v3)
+
+| Contract | Changes | Breaking |
+|---|---|---|
+| Agent | new `model_access` (strict boolean, defaults to `false`). With `allowed_tools`, it decides whether dispatching the agent needs a permission check | no (defaulted) |
+
 ## 0.2.0 (2026-09-27)
 
 Ports the domain schemas from the old `greenloop-contracts` repository (JSON Schema, draft 2020-12) into the Pydantic models. The new security fields (principal, provenance, approval hash, correlation id) are kept; the old business meaning is added on top. No compatibility with the old field names or timestamp strings is kept: nothing in production consumed the old shapes.

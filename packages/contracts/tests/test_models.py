@@ -432,3 +432,20 @@ class TestAuditRecord:
     def test_rejects_malformed_hash(self, payloads, bad_hash):
         with pytest.raises(ValidationError):
             AuditRecord.model_validate({**payloads["AuditRecord"], "operation_hash": bad_hash})
+
+
+class TestAgentModelAccess:
+    def test_defaults_to_no_model_access(self, payloads):
+        assert Agent.model_validate(payloads["Agent"]).model_access is False
+
+    def test_model_access_can_be_declared(self, payloads):
+        agent = Agent.model_validate({**payloads["Agent"], "model_access": True})
+        assert agent.model_access is True
+
+    @pytest.mark.parametrize("value", ["true", "yes", 1, None])
+    def test_model_access_is_a_strict_boolean(self, payloads, value):
+        with pytest.raises(ValidationError):
+            Agent.model_validate({**payloads["Agent"], "model_access": value})
+
+    def test_agent_schema_is_version_3(self):
+        assert Agent.schema_version == "3"
