@@ -1,11 +1,11 @@
 # ADR 0009: Approvals are stored and consumed by the broker
 
-- Status: Accepted (implementation in PR5b, not built yet)
+- Status: Accepted; implemented in PR5b-1 (contracts) and PR5b-2 (roles, store, APIs)
 - Date: 2026-10-02
 
 ## Context
 
-Port decision 2 (2026-09-28) put approval storage and consumption in `services/broker`, with the orchestrator's `/v1/approvals` forwarding through `tools/broker_client.py`. The broker today binds approvals to a SHA256 of the exact operation and consumes them once, but only in memory (`app/approval_binding.py`). It has no database, no authentication and no approval endpoints. PR5 was split so this security-critical half gets its own review.
+Port decision 2 (2026-09-28) put approval storage and consumption in `services/broker`, with the orchestrator's `/v1/approvals` forwarding through `tools/broker_client.py`. Before PR5b the broker bound approvals to a SHA256 of the exact operation and consumed them once, but only in memory (`app/approval_binding.py`, removed in PR5b-2). It had no database, no authentication and no approval endpoints. PR5 was split so this security-critical half gets its own review.
 
 ## Decision
 
@@ -25,7 +25,23 @@ PR5b adds an `Approval` contract in contracts 0.3.0, a Postgres approval store a
 9. **Retries.** The orchestrator's broker client retries only GETs. Create and decide carry an idempotency key, and the broker returns the existing result for a repeated key instead of acting twice.
 10. **Roles both ways.** A test logs in as each role and asserts the orchestrator role is denied on `broker.*` and the broker role is denied on the orchestrator's `public` tables. Role passwords and service tokens are never hardcoded or committed: they come from a prompt or an environment variable, and Terry runs the bootstrap and token issue.
 
+### Added 2026-10-02 (PR5b-2 implementation decisions)
+
+11. **Trust boundary between the services.** The broker trusts the orchestrator's statement of who is acting (`ApprovalActor`: principal, user or system, inside a dispatch or not) because the call carries the service token. The orchestrator fills those fields only from its authenticated `Principal` and the dispatch context (`orchestration/dispatch_context.py`), never from user request data. The broker still checks that the decider owns the approval (anyone else gets the same 404 as a missing approval) and refuses non-human deciders itself. Later hardening: a signed per-user assertion, so the broker can verify the human independently of the orchestrator.
+12. **Request contracts (contracts 0.4.0).** `ApprovalCreateRequest` and `ApprovalDecisionRequest` are the only request bodies. The actor's `kind` and `in_dispatch` have no defaults, and no request can carry an approval id, status, summary or hash.
+13. **No consume endpoint.** Consume is internal to the broker (`ApprovalStore.consume`), used by its phase 3 tool path and tested directly.
+14. **The broker is not published.** Compose gives it no host port; only the orchestrator, on the compose network, can reach it.
+15. **The operation is stored as `json`, not `jsonb`.** `jsonb` rewrites numbers (`1e16` comes back as an integer, `-0.0` as `0`), which would break the hash binding of a stored operation. A test fails if the column becomes `jsonb`.
+16. **Roles.** `scripts/db/bootstrap-roles.sql` creates `greenloop_orchestrator` (owns `public`) and `greenloop_broker` (owns `broker`) with no cluster privileges, and `transfer-public-ownership.sql` moved the existing tables (decision B). Both run from PowerShell wrappers that keep passwords off command lines and out of the server log; see [database roles](../database-roles.md).
+
 ## Consequences
 
 - The broker becomes a database service with its own migrations and role.
 - The orchestrator can read and decide approvals only through the broker API, so a bug in the orchestrator can't mark an approval consumed.
+- Each service runs its own migrations as its own role. The bootstrap superuser is needed only for the bootstrap and ownership scripts.
+
+## Known gaps
+
+- No end-to-end test runs the orchestrator against a real broker; each side is tested against a fake of the other, because both services use a top-level `app` package.
+- The orchestrator audits consume only once the phase 3 tool path calls it; until then only the broker audits consume.
+- Unauthenticated requests to the broker each write an audit row. The broker is reachable only on the internal network, so this is not a flooding risk today; it becomes one if the broker is ever exposed.
