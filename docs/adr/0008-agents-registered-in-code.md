@@ -20,7 +20,8 @@ PR5a ports the agent registry and dispatch from `greenloop-canonical-orchestrato
 ## Consequences
 
 - Adding an agent needs a PR, tests and review.
-- **Agent-level permission is not enforced yet.** Any authenticated principal can dispatch any active agent. That is acceptable only while the registered agents are inert; a permission check through `permissions/` is required before any agent with model or tool access is registered.
+- **Agent-level permission (Terry, 2026-10-02).** The registry refuses to register an agent whose `Agent.allowed_tools` is non-empty unless it was built with a dispatch permission check (`AgentRegistrationError`, raised at startup). When a check is present, `dispatcher.dispatch` asks it before running and refuses with `403 DISPATCH_FORBIDDEN` and a `denied` audit entry (`permission_denied`). No check exists today, so only tool-less agents can run, and any authenticated principal may dispatch them. The real per-principal check is built in PR5b through the one permission model (`app/permissions/`), beside approvals; this is a hook for it, not a second permission system.
+- **Model access has no contract field.** The `Agent` contract can express tool access (`allowed_tools`) but not model access, so the guard can't cover an agent that calls a model without tools. Closing that needs a contract change (for example a `model_access` flag in contracts 0.3.0) and is Terry's decision.
 - Agents must not block the event loop: the deadline can only interrupt an agent at an `await` (`BaseAgent` says so).
 - Not handled yet, tracked with M10 (no per-principal rate or cost limit): a request body-size limit in middleware, a per-principal dispatch concurrency limit (429), a limit on audited refusals (each unknown `agent_id` writes one row), and keeping execution records from crowding recency-based chat retrieval.
 - Tool use inside agents still goes permission check, approval, broker, audit (PR5b and phase 3).

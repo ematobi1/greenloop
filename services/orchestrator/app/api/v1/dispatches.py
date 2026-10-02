@@ -106,6 +106,10 @@ async def create_dispatch(
         )
     except dispatcher.AgentNotFoundError as refusal:
         raise _refused(agent_not_found(), refusal) from None
+    except dispatcher.DispatchForbiddenError as refusal:
+        raise _refused(
+            ApiError(403, "DISPATCH_FORBIDDEN", "You may not dispatch this agent."), refusal
+        ) from None
     except dispatcher.AgentNotActiveError as refusal:
         raise _refused(
             ApiError(409, "AGENT_NOT_ACTIVE", "This agent is not active."), refusal
