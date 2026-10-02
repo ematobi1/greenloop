@@ -192,3 +192,38 @@ def test_a_cancelled_dispatch_is_recorded_as_cancelled_before_cancelling(
     assert audit.outcome == "failed"
     assert audit.details["status"] == "cancelled"
     assert audit.details["error_code"] == "AGENT_CANCELLED"
+
+
+def test_a_second_cancellation_does_not_lose_the_cancelled_record(session_factory, issue_token):
+    """The shield's await can itself be cancelled; the record still completes in its
+    thread, and asyncio.run drains the executor before returning."""
+    issue_token("user-1")
+    registry = AgentRegistry()
+    registry.register(_SlowAgent())
+
+    async def scenario():
+        task = asyncio.create_task(
+            dispatcher.dispatch(
+                registry,
+                session_factory,
+                principal_id="user-1",
+                correlation_id="req-1",
+                agent_id="echo-reference-agent",
+                task_id="task-1",
+                inputs={},
+                timeout_ms=None,
+            )
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(scenario())
+    with session_factory() as session:
+        [audit] = session.scalars(
+            select(AuditRecordRow).where(AuditRecordRow.action == "agent.dispatch")
+        ).all()
+    assert audit.details["status"] == "cancelled"

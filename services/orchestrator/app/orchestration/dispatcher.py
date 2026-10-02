@@ -9,7 +9,9 @@ Once an agent has returned, its result is a fact: nothing after that point may h
 or change it. `run` turns every agent failure (exception, timeout, a wrong type, a
 result for a different dispatch) into a failed ExecutionResult with a user-safe
 error. A cancelled dispatch (client gone, shutdown) is recorded as cancelled before
-the cancellation propagates. `record` never raises: it writes the execution memory
+the cancellation propagates. The record runs in a worker thread, so a second
+cancellation can't stop it, but the host must drain the default executor on shutdown
+(uvicorn and asyncio.run do). `record` never raises: it writes the execution memory
 record and the audit entry in one transaction, falls back to the audit entry alone,
 and reports what it managed.
 
