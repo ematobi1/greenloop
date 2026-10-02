@@ -14,7 +14,6 @@ from app.core.config import Settings
 from app.db.models import AuditRecordRow, MemoryRecordRow
 from app.main import create_app
 from app.memory.execution import ExecutionMemoryStatus, record_execution
-from app.memory.store import MemoryStore
 from app.orchestration import dispatcher
 from greenloop_contracts import Dispatch
 
@@ -38,7 +37,7 @@ def test_a_dispatch_writes_private_execution_memory_and_an_audit_entry(
         headers={"Authorization": f"Bearer {token}"},
     )
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.headers["X-Execution-Memory"] == "recorded"
     dispatch_id = response.json()["dispatch_id"]
     with pg_session_factory() as session:
@@ -67,6 +66,6 @@ def test_recording_a_dispatch_twice_is_already_recorded_on_postgres(
     statuses = []
     for _ in range(2):
         with pg_session_factory() as session:
-            statuses.append(record_execution(MemoryStore(session, "it"), item, result))
+            statuses.append(record_execution(session, "it", item, result))
             session.commit()
     assert statuses == [ExecutionMemoryStatus.RECORDED, ExecutionMemoryStatus.ALREADY_RECORDED]
