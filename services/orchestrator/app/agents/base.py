@@ -10,3 +10,8 @@ class BaseAgent(ABC):
 
     @abstractmethod
     async def run(self, item: Dispatch) -> ExecutionResult: ...
+
+
+def result_id(item: Dispatch) -> str:
+    """One result per dispatch, so the id is derived from it."""
+    return f"res-{item.dispatch_id.removeprefix('dsp-')}"
