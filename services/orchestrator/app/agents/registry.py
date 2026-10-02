@@ -9,11 +9,14 @@ permission check, and every dispatch of it asks that check. The check belongs to
 one permission model (`app/permissions/dispatch.py`); build_agent_registry installs it.
 """
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
 from app.agents.base import BaseAgent
-from app.core.auth import Principal
+from app.permissions.dispatch import needs_dispatch_permission
 from greenloop_contracts import Agent, AgentDomain, AgentStatus
+
+if TYPE_CHECKING:
+    from app.core.auth import Principal
 
 
 class UnknownAgentError(LookupError):
@@ -27,12 +30,7 @@ class AgentRegistrationError(ValueError):
 class DispatchPermissionCheck(Protocol):
     """May `principal` dispatch `agent`? app/permissions/dispatch.py supplies it."""
 
-    def __call__(self, principal: Principal, agent: Agent) -> bool: ...
-
-
-def needs_permission(agent: Agent) -> bool:
-    """An agent that can reach a model or a tool needs a dispatch permission check."""
-    return agent.model_access or bool(agent.allowed_tools)
+    def __call__(self, principal: "Principal", agent: Agent) -> bool: ...
 
 
 class AgentRegistry:
@@ -44,7 +42,7 @@ class AgentRegistry:
         descriptor = agent.descriptor
         if descriptor.agent_id in self._agents:
             raise AgentRegistrationError(f"agent {descriptor.agent_id!r} is already registered")
-        if needs_permission(descriptor) and self._permission_check is None:
+        if needs_dispatch_permission(descriptor) and self._permission_check is None:
             access = (
                 [f"tools {', '.join(descriptor.allowed_tools)}"] if descriptor.allowed_tools else []
             )
@@ -55,11 +53,11 @@ class AgentRegistry:
             )
         self._agents[descriptor.agent_id] = agent
 
-    def may_dispatch(self, principal: Principal, agent: BaseAgent) -> bool:
+    def may_dispatch(self, principal: "Principal", agent: BaseAgent) -> bool:
         """Without a check, only agents that reach no model or tool can be registered,
         so there is nothing to permit. With one, the check decides."""
         if self._permission_check is None:
-            return not needs_permission(agent.descriptor)
+            return not needs_dispatch_permission(agent.descriptor)
         return self._permission_check(principal, agent.descriptor)
 
     def get(self, agent_id: str) -> BaseAgent:

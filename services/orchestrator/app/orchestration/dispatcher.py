@@ -6,7 +6,7 @@ server-side, runs it and records it. Tool use inside an agent still goes permiss
 check, approval, broker, audit.
 
 Once an agent has returned, its result is a fact: nothing after that point may hide
-or change it. `run` turns every agent failure (exception, timeout, a wrong type, a
+or change it. `_run` turns every agent failure (exception, timeout, a wrong type, a
 result for a different dispatch, times outside the observed window) into a failed
 ExecutionResult with a user-safe error. A cancelled dispatch (client gone, shutdown)
 is recorded as cancelled before the cancellation propagates. The record runs in a
@@ -112,7 +112,8 @@ def _failed(item: Dispatch, started_at: datetime, code: str, message: str) -> Ex
     return _ended(item, started_at, ExecutionStatus.FAILED, code, message)
 
 
-async def run(agent: BaseAgent, item: Dispatch) -> ExecutionResult:
+async def _run(agent: BaseAgent, item: Dispatch) -> ExecutionResult:
+    """No permission check here: only `dispatch` may call it."""
     started_at = datetime.now(UTC)
     deadline = asyncio.timeout((item.timeout_ms or DEFAULT_TIMEOUT_MS) / 1000)
     try:
@@ -179,6 +180,16 @@ async def dispatch(
             record_refusal, session_factory, principal_id, correlation_id, agent_id, "agent_unknown"
         )
         raise AgentNotFoundError(audited) from None
+    if not registry.may_dispatch(principal, agent):
+        audited = await asyncio.to_thread(
+            record_refusal,
+            session_factory,
+            principal_id,
+            correlation_id,
+            agent_id,
+            "permission_denied",
+        )
+        raise DispatchForbiddenError(audited)
     status = agent.descriptor.status
     if status is not AgentStatus.ACTIVE:
         audited = await asyncio.to_thread(
@@ -190,16 +201,6 @@ async def dispatch(
             f"agent_{status.value}",
         )
         raise AgentNotActiveError(audited)
-    if not registry.may_dispatch(principal, agent):
-        audited = await asyncio.to_thread(
-            record_refusal,
-            session_factory,
-            principal_id,
-            correlation_id,
-            agent_id,
-            "permission_denied",
-        )
-        raise DispatchForbiddenError(audited)
 
     item = Dispatch(
         dispatch_id=new_dispatch_id(),
@@ -213,7 +214,7 @@ async def dispatch(
     )
     started_at = datetime.now(UTC)
     try:
-        result = await run(agent, item)
+        result = await _run(agent, item)
     except asyncio.CancelledError:
         cancelled = _ended(
             item,

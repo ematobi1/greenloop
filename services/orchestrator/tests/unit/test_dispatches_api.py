@@ -221,7 +221,7 @@ def test_no_database_is_503_before_any_agent_runs(client, auth, monkeypatch):
     async def spy(agent, item):
         ran.append(item)
 
-    monkeypatch.setattr(dispatcher, "run", spy)
+    monkeypatch.setattr(dispatcher, "_run", spy)
     session_factory = client.app.state.session_factory
     token_headers = auth
     client.app.state.session_factory = None
@@ -347,3 +347,22 @@ def test_with_the_real_check_a_user_cannot_dispatch_a_tool_agent_but_a_system_pr
     assert allowed.status_code == 200
     assert _ToolAgent.ran
     assert allowed.json()["error"]["code"] == "AGENT_FAILED"
+
+
+class _DisabledToolAgent(_ToolAgent):
+    descriptor = _ToolAgent.descriptor.model_copy(
+        update={"agent_id": "disabled-tool-agent", "status": AgentStatus.DISABLED}
+    )
+
+
+def test_a_user_gets_403_not_409_for_a_disabled_restricted_agent(client, issue_token):
+    """Permission is checked before status, so a user can't learn whether an agent
+    they may not use is disabled."""
+    registry = registry_module.build_agent_registry()
+    registry.register(_DisabledToolAgent())
+    client.app.state.agent_registry = registry
+    user = {"Authorization": f"Bearer {issue_token('user-1')}"}
+    system = {"Authorization": f"Bearer {issue_token('svc-1', PrincipalRole.SYSTEM)}"}
+
+    assert _dispatch(client, user, agent_id="disabled-tool-agent").status_code == 403
+    assert _dispatch(client, system, agent_id="disabled-tool-agent").status_code == 409
