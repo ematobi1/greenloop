@@ -33,6 +33,8 @@ PR5b adds an `Approval` contract in contracts 0.3.0, a Postgres approval store a
 14. **The broker is not published.** Compose gives it no host port; only the orchestrator, on the compose network, can reach it.
 15. **The operation is stored as `json`, not `jsonb`.** `jsonb` rewrites numbers (`1e16` comes back as an integer, `-0.0` as `0`), which would break the hash binding of a stored operation. A test fails if the column becomes `jsonb`.
 16. **Roles.** `scripts/db/bootstrap-roles.sql` creates `greenloop_orchestrator` (owns `public`) and `greenloop_broker` (owns `broker`) with no cluster privileges, and `transfer-public-ownership.sql` moved the existing tables (decision B). Both run from PowerShell wrappers that keep passwords off command lines and out of the server log; see [database roles](../database-roles.md).
+17. **`scripts/db/` is shared glue.** The role and ownership SQL belongs to neither service. Both services' Postgres tests run those files (the same ones the PowerShell wrappers run) so each suite proves its own role works; a change there must pass both suites. This is the one place both test suites read outside their service, alongside the contracts package.
+18. **Each container gets only its own variables.** Compose has no shared `env_file`: the orchestrator receives its database URL, the service token and its AI settings; the broker receives its database URL and approval lifetime. Neither sees the other's database password or the bootstrap superuser's. `scripts/tests/test-compose-secrets.ps1` checks it.
 
 ## Consequences
 
@@ -44,4 +46,9 @@ PR5b adds an `Approval` contract in contracts 0.3.0, a Postgres approval store a
 
 - No end-to-end test runs the orchestrator against a real broker; each side is tested against a fake of the other, because both services use a top-level `app` package.
 - The orchestrator audits consume only once the phase 3 tool path calls it; until then only the broker audits consume.
-- Unauthenticated requests to the broker each write an audit row. The broker is reachable only on the internal network, so this is not a flooding risk today; it becomes one if the broker is ever exposed.
+- **Runtime roles own their tables.** Each service's role runs its own migrations, so it owns its audit table and could disable the append-only trigger. Splitting a migration (owner) role from a runtime role with only the grants it needs closes this; open decision.
+- **Service tokens are not scoped.** Any valid token can act for any principal. Only the orchestrator holds one today; scopes are needed before a second service gets a token.
+- **The dispatch flag is a context variable.** It follows tasks, not `run_in_executor` or new threads. Agents don't reach the approvals service today; if a tool path ever runs agent code in a thread, it must carry the flag explicitly.
+- **Stored approvals depend on the hash staying stable.** Every read recomputes `operation_hash` from the stored operation; a future change to `ToolPermission` serialization would make old rows unreadable, so such a change needs a migration of stored approvals.
+- The broker serves `/docs` and `/openapi.json` without authentication; turn them off before any non-local deployment.
+- Unauthenticated requests to the broker each write an audit row (a failed write still returns 401). The broker is reachable only on the internal network, so this is not a flooding risk today; it becomes one if the broker is ever exposed.

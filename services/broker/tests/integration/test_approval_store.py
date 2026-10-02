@@ -125,7 +125,7 @@ def test_the_same_key_for_a_different_operation_is_refused_and_audited(
         create(store, other, idempotency_key)
     [denied] = events(engine, operation_hash=operation_hash(other))
     assert (denied["outcome"], denied["details"]) == ("denied", {"reason": "idempotency_conflict"})
-    assert store.list_for(owner) == [first]
+    assert store.list_for(owner) == ([first], 1)
 
 
 def test_idempotency_keys_are_per_principal(store, permission):
@@ -162,20 +162,30 @@ def test_get_and_list_are_scoped_to_the_owner(store, operation, owner):
     approval = create(store, operation)
     assert store.get(approval.approval_id, principal_id=owner) == approval
     assert store.get(approval.approval_id, principal_id="someone-else") is None
-    assert store.list_for("someone-else") == []
+    assert store.list_for("someone-else") == ([], 0)
 
 
 def test_list_filters_by_status_newest_first(store, permission, owner):
     first = create(store, permission(principal_id=owner, n=1))
     second = create(store, permission(principal_id=owner, n=2))
     decided = decide(store, first)
-    assert [a.approval_id for a in store.list_for(owner)] == [
+    assert [a.approval_id for a in store.list_for(owner)[0]] == [
         second.approval_id,
         first.approval_id,
     ]
-    assert store.list_for(owner, status=ApprovalStatus.APPROVED) == [decided]
-    assert store.list_for(owner, status=ApprovalStatus.PENDING) == [second]
-    assert len(store.list_for(owner, limit=1)) == 1
+    assert store.list_for(owner, status=ApprovalStatus.APPROVED) == ([decided], 1)
+    assert store.list_for(owner, status=ApprovalStatus.PENDING) == ([second], 1)
+    page, total = store.list_for(owner, limit=1)
+    assert (len(page), total) == (1, 2)
+
+
+def test_an_expired_pending_approval_is_not_listed_as_pending(store, db_roles, permission, owner):
+    live = create(store, permission(principal_id=owner, n=1))
+    stale = create(store, permission(principal_id=owner, n=2))
+    age(db_roles, stale.approval_id)
+    pending, total = store.list_for(owner, status=ApprovalStatus.PENDING)
+    assert ([a.approval_id for a in pending], total) == ([live.approval_id], 1)
+    assert store.list_for(owner)[1] == 2
 
 
 # decide

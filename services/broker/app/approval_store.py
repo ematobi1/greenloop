@@ -175,17 +175,26 @@ class ApprovalStore:
 
     def list_for(
         self, principal_id: str, *, status: ApprovalStatus | None = None, limit: int = 50
-    ) -> list[Approval]:
-        statement = (
+    ) -> tuple[list[Approval], int]:
+        """One page, newest first, and the total matching. Pending means still
+        decidable: an expired pending approval is left out of status=pending."""
+        conditions = [approvals.c.principal_id == principal_id]
+        if status is not None:
+            conditions.append(approvals.c.status == status.value)
+        if status is ApprovalStatus.PENDING:
+            conditions.append(approvals.c.expires_at > func.now())
+        page = (
             select(approvals)
-            .where(approvals.c.principal_id == principal_id)
+            .where(*conditions)
             .order_by(approvals.c.created_at.desc(), approvals.c.approval_id)
             .limit(max(1, min(limit, LIST_LIMIT_MAX)))
         )
-        if status is not None:
-            statement = statement.where(approvals.c.status == status.value)
         with self._engine.connect() as connection:
-            return [_to_contract(row) for row in connection.execute(statement).mappings()]
+            total = connection.scalar(
+                select(func.count()).select_from(approvals).where(*conditions)
+            )
+            items = [_to_contract(row) for row in connection.execute(page).mappings()]
+        return items, total or 0
 
     def decide(
         self,

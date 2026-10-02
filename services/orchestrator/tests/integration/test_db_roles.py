@@ -154,6 +154,7 @@ CREATE SEQUENCE public.zz_sentinel_standalone;
 CREATE VIEW public.zz_sentinel_view AS SELECT id FROM public.zz_sentinel;
 CREATE TYPE public.zz_sentinel_mood AS ENUM ('calm');
 CREATE DOMAIN public.zz_sentinel_label AS text;
+CREATE TYPE public.zz_sentinel_span AS RANGE (subtype = int4);
 CREATE FUNCTION public.zz_sentinel_fn() RETURNS int LANGUAGE sql AS 'SELECT 1';
 """
 DROP_SENTINELS = """
@@ -162,6 +163,7 @@ DROP TABLE IF EXISTS public.zz_sentinel;
 DROP SEQUENCE IF EXISTS public.zz_sentinel_standalone;
 DROP TYPE IF EXISTS public.zz_sentinel_mood;
 DROP DOMAIN IF EXISTS public.zz_sentinel_label;
+DROP TYPE IF EXISTS public.zz_sentinel_span;
 DROP FUNCTION IF EXISTS public.zz_sentinel_fn();
 """
 SENTINEL_OWNERS = """
@@ -170,7 +172,9 @@ SELECT relname AS name, relowner::regrole::text AS owner FROM pg_class
 UNION ALL
 SELECT typname, typowner::regrole::text FROM pg_type
  WHERE typnamespace = 'public'::regnamespace
-   AND typname IN ('zz_sentinel_mood', 'zz_sentinel_label')
+   AND typname IN (
+       'zz_sentinel_mood', 'zz_sentinel_label', 'zz_sentinel_span', 'zz_sentinel_span_multirange'
+   )
 UNION ALL
 SELECT proname, proowner::regrole::text FROM pg_proc
  WHERE pronamespace = 'public'::regnamespace AND proname = 'zz_sentinel_fn'

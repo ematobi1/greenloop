@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from app.config import BrokerSettings
@@ -41,3 +42,13 @@ def test_there_is_no_consume_route():
     paths = set(client.app.openapi()["paths"])
     assert "/v1/approvals/{approval_id}/decisions" in paths
     assert not any("consume" in path for path in paths)
+
+
+def test_a_malformed_database_url_never_reaches_the_error(monkeypatch):
+    url = "not a url with synthetic-pass inside"
+    monkeypatch.setenv("BROKER_DATABASE_URL", url)
+    with pytest.raises(RuntimeError) as raised:
+        create_app(BrokerSettings(_env_file=None))
+    assert "synthetic-pass" not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__

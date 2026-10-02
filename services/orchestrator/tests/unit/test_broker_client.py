@@ -107,11 +107,11 @@ async def test_list_and_get_send_the_principal_and_validate_the_response():
         (200, {"data": [approval_json()], "meta": {"total": 1}}), (200, approval_json())
     )
     client = broker.client()
-    listed = await client.list_approvals(
+    listed, total = await client.list_approvals(
         principal_id="user-1", status=ApprovalStatus.PENDING, limit=5, correlation_id="c"
     )
     got = await client.get_approval("apr-1", principal_id="user-1", correlation_id="c")
-    assert listed == [got]
+    assert (listed, total) == ([got], 1)
     assert dict(broker.requests[0].url.params) == {
         "principal_id": "user-1",
         "status": "pending",
@@ -183,8 +183,20 @@ async def test_an_invalid_approval_from_the_broker_is_refused(body):
         await broker.client().get_approval("apr-1", principal_id="user-1", correlation_id="c")
 
 
-async def test_a_list_without_data_is_refused():
-    broker = Broker((200, {"items": []}))
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"items": []},
+        {"data": []},
+        {"data": [], "meta": {}},
+        {"data": [], "meta": {"total": "3"}},
+        {"data": [], "meta": {"total": True}},
+        {"data": {}, "meta": {"total": 0}},
+        [],
+    ],
+)
+async def test_a_malformed_list_is_refused(body):
+    broker = Broker((200, body))
     with pytest.raises(BrokerError, match="BROKER_BAD_RESPONSE"):
         await broker.client().list_approvals(principal_id="user-1", correlation_id="c")
 

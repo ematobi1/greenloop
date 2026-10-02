@@ -4,7 +4,8 @@
 -- Run as a superuser after bootstrap-roles.sql, in one transaction. Idempotent.
 --
 -- Extension members are left alone. Sequences and indexes owned by a table move
--- with the table. The last block refuses to commit if anything is left behind.
+-- with the table. A multirange does not follow its range type, so both move.
+-- The last block refuses to commit if anything is left behind.
 
 DO $transfer$
 DECLARE
@@ -85,6 +86,14 @@ BEGIN
           AND NOT EXISTS (
               SELECT FROM pg_depend d
               WHERE d.classid = 'pg_proc'::regclass AND d.objid = p.oid AND d.deptype = 'e'
+          )
+        UNION ALL
+        SELECT t.oid::regtype::text
+        FROM pg_type t
+        WHERE t.typnamespace = 'public'::regnamespace AND t.typowner <> orchestrator
+          AND NOT EXISTS (
+              SELECT FROM pg_depend d
+              WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e'
           )
     ) AS remaining;
     IF leftovers IS NOT NULL THEN

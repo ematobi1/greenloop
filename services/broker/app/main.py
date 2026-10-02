@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from sqlalchemy import Engine
+from sqlalchemy.exc import ArgumentError
 
 from app.api import ApiError, error_response, router
 from app.approval_store import ApprovalStore
@@ -47,7 +48,11 @@ def create_app(
 ) -> FastAPI:
     settings = settings or get_settings()
     if engine is None and settings.database_url is not None:
-        engine = make_engine(settings.database_url.get_secret_value())
+        try:
+            engine = make_engine(settings.database_url.get_secret_value())
+        except ArgumentError:
+            # The original message can quote the URL, password included.
+            raise RuntimeError("BROKER_DATABASE_URL is not a valid database URL.") from None
 
     app = FastAPI(title="GreenLoop Broker", version="0.1.0")
     app.state.policy = load_policy(policy_dir)

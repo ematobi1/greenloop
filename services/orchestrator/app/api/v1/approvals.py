@@ -5,7 +5,8 @@ approvals. The principal always comes from the auth token; the caller can never 
 another principal or send an actor. There is no create route (decision E): approvals
 are requested by the tool path.
 
-    GET  /v1/approvals                       the principal's approvals, newest first
+    GET  /v1/approvals                       the principal's approvals, newest first;
+                                             status=pending leaves out expired ones
     GET  /v1/approvals/{approval_id}         one approval
     POST /v1/approvals/{approval_id}/decisions   {"approved": true|false}
 
@@ -94,7 +95,7 @@ async def list_approvals(
     limit: Limit = 50,
 ) -> ApprovalList:
     try:
-        items = await _broker(request).list_approvals(
+        items, total = await _broker(request).list_approvals(
             principal_id=principal.principal_id,
             status=status,
             limit=limit,
@@ -102,7 +103,7 @@ async def list_approvals(
         )
     except BrokerError as error:
         raise _broker_failed(error) from None
-    return ApprovalList(data=items, meta={"total": len(items), "limit": limit})
+    return ApprovalList(data=items, meta={"total": total, "limit": limit})
 
 
 @router.get("/{approval_id}")

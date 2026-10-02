@@ -7,7 +7,9 @@ a dispatch before calling the broker (the broker refuses it again), and it audit
 create, decide and every refusal in the orchestrator's own audit log.
 
 Audit writes are best effort once the broker has acted: a failure is logged, never
-allowed to hide the broker's result.
+allowed to hide the broker's result. A broker refusal (4xx) is audited as denied; a
+broker that could not be reached or failed (network error, 5xx, bad response) is
+audited as failed, because the request may or may not have taken effect.
 """
 
 import asyncio
@@ -54,17 +56,22 @@ async def request_approval(
     principal: Principal,
     permission: ToolPermission,
     *,
+    idempotency_key: str,
     correlation_id: str,
 ) -> Approval:
     """Asks the broker for a pending approval of `permission`. Used by the tool path
-    (phase 3); there is no public create route (decision E)."""
+    (phase 3); there is no public create route (decision E).
+
+    The caller supplies `idempotency_key` and must reuse it when it retries the same
+    request (for example one key per tool-call attempt), so a lost response can't
+    create a second approval for one operation."""
     if permission.principal_id != principal.principal_id:
         raise ValueError("an approval can only be requested for the principal's own operation")
     try:
         approval = await client.create_approval(
             permission,
             actor_for(principal),
-            idempotency_key=f"create-{uuid.uuid4().hex}",
+            idempotency_key=idempotency_key,
             correlation_id=correlation_id,
         )
     except BrokerError as error:
@@ -72,7 +79,7 @@ async def request_approval(
             session_factory,
             principal,
             "approval.create",
-            AuditOutcome.DENIED,
+            _refusal_outcome(error),
             correlation_id,
             details={"reason": error.code},
         )
@@ -127,7 +134,7 @@ async def decide(
             session_factory,
             principal,
             "approval.decide",
-            AuditOutcome.DENIED,
+            _refusal_outcome(error),
             correlation_id,
             resource_id=approval_id,
             details={"reason": error.code},
@@ -142,6 +149,12 @@ async def decide(
         approval=approval,
     )
     return approval
+
+
+def _refusal_outcome(error: BrokerError) -> AuditOutcome:
+    if error.status is not None and 400 <= error.status < 500:
+        return AuditOutcome.DENIED
+    return AuditOutcome.FAILED
 
 
 async def _audit(
