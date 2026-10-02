@@ -97,7 +97,7 @@ async def create_dispatch(
         outcome = await dispatcher.dispatch(
             registry,
             session_factory,
-            principal_id=principal.principal_id,
+            principal=principal,
             correlation_id=request.state.correlation_id,
             agent_id=body.agent_id,
             task_id=body.task_id,

@@ -3,15 +3,16 @@
 Agents register in code at startup (see build_agent_registry), not through the API:
 adding an agent is a reviewed code change, like adding a domain to the Agent contract.
 
-An agent that declares tool access (`Agent.allowed_tools`) can only be registered on a
-registry that has a dispatch permission check. None exists yet: the per-principal
-check arrives in PR5b through the one permission model (`app/permissions/`), beside
-approvals (ADR 0008). Until then such agents are refused at startup.
+An agent that declares model access (`Agent.model_access`) or tool access
+(`Agent.allowed_tools`) can only be registered on a registry that has a dispatch
+permission check, and every dispatch of it asks that check. The check belongs to the
+one permission model (`app/permissions/dispatch.py`); build_agent_registry installs it.
 """
 
 from typing import Protocol
 
 from app.agents.base import BaseAgent
+from app.core.auth import Principal
 from greenloop_contracts import Agent, AgentDomain, AgentStatus
 
 
@@ -24,9 +25,14 @@ class AgentRegistrationError(ValueError):
 
 
 class DispatchPermissionCheck(Protocol):
-    """May `principal_id` dispatch `agent`? Supplied by app/permissions in PR5b."""
+    """May `principal` dispatch `agent`? app/permissions/dispatch.py supplies it."""
 
-    def __call__(self, principal_id: str, agent: Agent) -> bool: ...
+    def __call__(self, principal: Principal, agent: Agent) -> bool: ...
+
+
+def needs_permission(agent: Agent) -> bool:
+    """An agent that can reach a model or a tool needs a dispatch permission check."""
+    return agent.model_access or bool(agent.allowed_tools)
 
 
 class AgentRegistry:
@@ -38,20 +44,23 @@ class AgentRegistry:
         descriptor = agent.descriptor
         if descriptor.agent_id in self._agents:
             raise AgentRegistrationError(f"agent {descriptor.agent_id!r} is already registered")
-        if descriptor.allowed_tools and self._permission_check is None:
+        if needs_permission(descriptor) and self._permission_check is None:
+            access = (
+                [f"tools {', '.join(descriptor.allowed_tools)}"] if descriptor.allowed_tools else []
+            )
+            access += ["a model"] if descriptor.model_access else []
             raise AgentRegistrationError(
-                f"agent {descriptor.agent_id!r} declares tool access "
-                f"({', '.join(descriptor.allowed_tools)}) but this registry has no dispatch "
-                "permission check; tool-using agents wait for PR5b (ADR 0008)"
+                f"agent {descriptor.agent_id!r} can reach {' and '.join(access)} but this "
+                "registry has no dispatch permission check (ADR 0008)"
             )
         self._agents[descriptor.agent_id] = agent
 
-    def may_dispatch(self, principal_id: str, agent: BaseAgent) -> bool:
-        """Without a check, only agents with no tool access can be registered, so
-        there is nothing to permit. With one, the check decides."""
+    def may_dispatch(self, principal: Principal, agent: BaseAgent) -> bool:
+        """Without a check, only agents that reach no model or tool can be registered,
+        so there is nothing to permit. With one, the check decides."""
         if self._permission_check is None:
-            return not agent.descriptor.allowed_tools
-        return self._permission_check(principal_id, agent.descriptor)
+            return not needs_permission(agent.descriptor)
+        return self._permission_check(principal, agent.descriptor)
 
     def get(self, agent_id: str) -> BaseAgent:
         try:
@@ -73,8 +82,9 @@ class AgentRegistry:
 
 def build_agent_registry() -> AgentRegistry:
     from app.agents.reference import EchoReferenceAgent, FailingReferenceAgent
+    from app.permissions.dispatch import may_dispatch
 
-    registry = AgentRegistry()
+    registry = AgentRegistry(permission_check=may_dispatch)
     registry.register(EchoReferenceAgent())
     registry.register(FailingReferenceAgent())
     return registry

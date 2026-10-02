@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.agents.reference import EchoReferenceAgent
 from app.agents.registry import AgentRegistry
+from app.core.auth import Principal
 from app.db.models import AuditRecordRow
 from app.memory import execution
 from app.memory.execution import ExecutionMemoryStatus
@@ -171,7 +172,7 @@ def test_a_cancelled_dispatch_is_recorded_as_cancelled_before_cancelling(
             dispatcher.dispatch(
                 registry,
                 session_factory,
-                principal_id="user-1",
+                principal=Principal(principal_id="user-1", display_name="User"),
                 correlation_id="req-1",
                 agent_id="echo-reference-agent",
                 task_id="task-1",
@@ -206,7 +207,7 @@ def test_a_second_cancellation_does_not_lose_the_cancelled_record(session_factor
             dispatcher.dispatch(
                 registry,
                 session_factory,
-                principal_id="user-1",
+                principal=Principal(principal_id="user-1", display_name="User"),
                 correlation_id="req-1",
                 agent_id="echo-reference-agent",
                 task_id="task-1",
