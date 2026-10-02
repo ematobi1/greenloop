@@ -1,5 +1,6 @@
 # Local development stack. Ports bind to 127.0.0.1 only; override host ports with
-# GREENLOOP_DB_PORT, GREENLOOP_ORCHESTRATOR_PORT, GREENLOOP_BROKER_PORT, GREENLOOP_WEB_PORT.
+# GREENLOOP_DB_PORT, GREENLOOP_ORCHESTRATOR_PORT, GREENLOOP_WEB_PORT. The broker is not
+# published: only containers on the compose network (the orchestrator) can reach it.
 # Values come from a local .env (gitignored); see .env.example for the names.
 #
 #   docker compose up -d db                 # Postgres + pgvector only
@@ -64,8 +65,6 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports:
-      - "127.0.0.1:${GREENLOOP_BROKER_PORT:-8100}:8100"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/health')"]
       interval: 10s
