@@ -47,6 +47,18 @@ jobs:
         working-directory: ${{ matrix.package }}
         run: python -m pytest -q
 
+  compose-secrets:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: pip install "pyyaml>=6"
+      - name: Each container gets only its own variables
+        run: python scripts/tests/check_compose_secrets.py docker-compose.yml
+
   orchestrator-postgres:
     runs-on: ubuntu-24.04
     services:
