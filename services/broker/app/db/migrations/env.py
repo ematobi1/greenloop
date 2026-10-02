@@ -8,7 +8,7 @@ Tests pass an open connection in `config.attributes["connection"]` instead.
 from alembic import context
 from sqlalchemy import Connection, engine_from_config, pool
 
-from app.config import BrokerSettings
+from app.config import get_settings
 from app.db.session import database_url
 from app.db.tables import SCHEMA, metadata
 
@@ -27,7 +27,7 @@ def _configure(**kwargs: object) -> None:
 
 
 def run_migrations_offline() -> None:
-    _configure(url=database_url(BrokerSettings.from_env()), literal_binds=True)
+    _configure(url=database_url(get_settings()), literal_binds=True)
     with context.begin_transaction():
         context.run_migrations()
 
@@ -44,7 +44,7 @@ def run_migrations_online() -> None:
         _run_with(connection)
         return
     connectable = engine_from_config(
-        {"sqlalchemy.url": database_url(BrokerSettings.from_env())},
+        {"sqlalchemy.url": database_url(get_settings())},
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
     )
