@@ -39,7 +39,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "DELETE"],
         allow_headers=["Authorization", "Content-Type"],
-        expose_headers=["X-Request-ID"],
+        expose_headers=["X-Request-ID", "X-Execution-Memory", "X-Audit-Persistence"],
     )
     app.include_router(health.router)
     app.include_router(v1_router, responses=ERROR_RESPONSES)
