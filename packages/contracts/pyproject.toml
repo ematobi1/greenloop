@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "greenloop-contracts"
-version = "0.2.0"
+version = "0.3.0"
 description = "Shared Pydantic contracts for every GreenLoop service."
 requires-python = ">=3.12"
 dependencies = ["pydantic>=2.7,<3"]

@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from greenloop_contracts.agent import Agent
+from greenloop_contracts.approval import Approval
 from greenloop_contracts.audit_record import AuditRecord
 from greenloop_contracts.base import ContractModel
 from greenloop_contracts.dispatch import Dispatch
@@ -29,6 +30,7 @@ CONTRACTS: Mapping[str, type[ContractModel]] = MappingProxyType(
             Dispatch,
             ToolPermission,
             ToolGrant,
+            Approval,
             MemoryRecord,
             Event,
             ExecutionResult,
