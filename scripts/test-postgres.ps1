@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Runs the orchestrator's Postgres tests against a throwaway pgvector container.
+Runs the orchestrator's and broker's Postgres tests against a throwaway pgvector container.
 
 .DESCRIPTION
 Starts a uniquely named pgvector/pgvector:pg16 container with a random password
@@ -13,13 +13,16 @@ on GREENLOOP_DB_PORT, default 5432).
 The port comes from -Port, else GREENLOOP_TEST_DB_PORT, else 55433.
 
 .EXAMPLE
-.\scripts\test-postgres.ps1                     # tests/integration
-.\scripts\test-postgres.ps1 -Path tests         # the whole orchestrator suite
+.\scripts\test-postgres.ps1                     # tests/integration of both services
+.\scripts\test-postgres.ps1 -Service broker     # broker only
+.\scripts\test-postgres.ps1 -Service orchestrator -Path tests   # the whole orchestrator suite
 .\scripts\test-postgres.ps1 -DryRun             # print the plan, start nothing
 #>
 param(
     [int]$Port = 0,
     [string]$Path = 'tests/integration',
+    [ValidateSet('all', 'orchestrator', 'broker')]
+    [string]$Service = 'all',
     [switch]$DryRun
 )
 
@@ -94,7 +97,7 @@ $Port = Resolve-TestDbPort $Port
 $name = 'greenloop-test-db-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
 
 if ($DryRun) {
-    Write-Host "container=$name port=$Port path=$Path"
+    Write-Host "container=$name port=$Port path=$Path service=$Service"
     exit 0
 }
 
@@ -124,13 +127,17 @@ try {
     Test-DbScripts $name
 
     $env:TEST_DATABASE_URL = "postgresql+psycopg://greenloop_test:$password@127.0.0.1:$Port/greenloop_test"
-    Write-Host "Postgres tests on $name (127.0.0.1:$Port): $Path"
-    Push-Location (Join-Path $root 'services\orchestrator')
-    try {
-        & $python -m pytest -q $Path
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
+    $suites = if ($Service -eq 'all') { 'orchestrator', 'broker' } else { @($Service) }
+    $exitCode = 0
+    foreach ($suite in $suites) {
+        Write-Host "Postgres tests on $name (127.0.0.1:$Port): services/$suite $Path"
+        Push-Location (Join-Path $root "services\$suite")
+        try {
+            & $python -m pytest -q $Path
+            if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE }
+        } finally {
+            Pop-Location
+        }
     }
 } finally {
     $env:TEST_DATABASE_URL = $previousUrl

@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "greenloop-broker"
 version = "0.1.0"
-description = "GreenLoop broker: policy, approval binding and ledger in front of MCP."
+description = "GreenLoop broker: policy, approvals and ledger in front of MCP."
 requires-python = ">=3.12"
 dependencies = [
     "greenloop-contracts",
@@ -16,6 +16,9 @@ dependencies = [
     "pydantic>=2.7,<3",
     "pyyaml>=6",
     "httpx2>=2.13",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
