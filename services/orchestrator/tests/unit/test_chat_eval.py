@@ -3,6 +3,7 @@
 import asyncio
 import importlib.util
 import json
+from datetime import UTC, datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -379,3 +380,147 @@ def test_ids_are_stripped_only_for_flagged_cases():
 )
 def test_the_memory_id_pattern_strips_only_ids(text, expected):
     assert chat_eval.MEMORY_ID.sub("", text) == expected
+
+
+SENTINEL = "SENTINEL-REPLY-TEXT-7Q"
+RUN_AT = datetime(2026, 10, 2, 23, 59, 30, tzinfo=UTC)
+
+
+def _summary_of(results, missing=()):
+    return chat_eval.results_summary(
+        results,
+        chat_eval.verdict(results, missing),
+        provider="fake",
+        model="fake-1",
+        commit="abc1234",
+        dirty=False,
+        now=RUN_AT,
+    )
+
+
+def test_the_results_summary_holds_counts_and_verdicts_but_no_text():
+    results = [
+        chat_eval.CaseResult(
+            id="mem-injection-canary-output",
+            category="memory_injection",
+            passed=False,
+            failures=["contains 'CANARY-7F3A'"],
+            reply=SENTINEL,
+            input_tokens=100,
+            output_tokens=7,
+        ),
+        chat_eval.CaseResult(
+            id="helpful-1", category="helpful", passed=True, reply=SENTINEL, output_tokens=3
+        ),
+        chat_eval.CaseResult(
+            id="helpful-2", category="helpful", passed=False, error="AI_PROVIDER_TIMEOUT"
+        ),
+    ]
+
+    summary = _summary_of(results, missing=["late-case"])
+
+    assert summary == {
+        "date": "2026-10-02T23:59:30Z",
+        "commit": "abc1234",
+        "dirty": False,
+        "provider": "fake",
+        "model": "fake-1",
+        "pass_rate": 0.3333,
+        "threshold": chat_eval.PASS_THRESHOLD,
+        "passed": False,
+        "safety_gate": {"passed": False, "failed": ["mem-injection-canary-output"]},
+        "not_scored": ["late-case"],
+        "tokens": {"input": 100, "output": 10},
+        "cases": [
+            {
+                "id": "mem-injection-canary-output",
+                "category": "memory_injection",
+                "passed": False,
+                "error": None,
+            },
+            {"id": "helpful-1", "category": "helpful", "passed": True, "error": None},
+            {
+                "id": "helpful-2",
+                "category": "helpful",
+                "passed": False,
+                "error": "AI_PROVIDER_TIMEOUT",
+            },
+        ],
+    }
+    text = json.dumps(summary)
+    assert SENTINEL not in text
+    assert "CANARY-7F3A" not in text
+
+
+def test_results_files_are_named_by_utc_date_and_commit_and_never_overwritten(tmp_path):
+    summary = _summary_of([_result("helpful", True)])
+
+    paths = [chat_eval.write_results(summary, tmp_path / "results") for _ in range(3)]
+
+    assert [p.name for p in paths] == [
+        "2026-10-02-abc1234.json",
+        "2026-10-02-abc1234-2.json",
+        "2026-10-02-abc1234-3.json",
+    ]
+    assert json.loads(paths[0].read_text(encoding="utf-8")) == summary
+
+
+def test_the_results_date_is_utc_even_for_a_local_timestamp():
+    local = datetime(2026, 10, 2, 20, 0, tzinfo=timezone(timedelta(hours=-5)))
+    summary = chat_eval.results_summary(
+        [],
+        chat_eval.verdict([]),
+        provider="p",
+        model="m",
+        commit="c",
+        dirty=True,
+        now=local,
+    )
+    assert summary["date"] == "2026-10-03T01:00:00Z"
+
+
+class _Registry:
+    def __init__(self, provider):
+        self.provider = provider
+
+    def get(self, name):
+        return self.provider
+
+
+def test_a_paid_run_writes_one_results_file_without_reply_text(monkeypatch, tmp_path, capsys):
+    import app.ai.providers.registry as registry_module
+
+    monkeypatch.setattr(
+        registry_module, "build_registry", lambda settings: _Registry(FakeProvider([SENTINEL]))
+    )
+    monkeypatch.setattr(chat_eval, "RESULTS_DIR", tmp_path)
+    monkeypatch.setattr(chat_eval, "git_state", lambda: ("abc1234", True))
+
+    assert chat_eval.main(["--limit", "2"]) == 1
+
+    [written] = tmp_path.iterdir()
+    assert written.name.endswith("-abc1234.json")
+    text = written.read_text(encoding="utf-8")
+    assert SENTINEL not in text
+    summary = json.loads(text)
+    assert summary["dirty"] is True
+    assert [c["id"] for c in summary["cases"]] == [c.id for c in CASES[:2]]
+    assert summary["not_scored"] == [c.id for c in CASES[2:]]
+    assert "results: " in capsys.readouterr().out
+
+
+def test_a_rescore_writes_no_results_file(monkeypatch, tmp_path):
+    monkeypatch.setattr(chat_eval, "RESULTS_DIR", tmp_path)
+    report = tmp_path.parent / "report.jsonl"
+    report.write_text(
+        json.dumps({"id": CASES[0].id, "reply": "A perfectly fine answer."}), encoding="utf-8"
+    )
+    chat_eval.main(["--rescore", str(report)])
+    assert list(tmp_path.iterdir()) == []
+
+
+def test_git_state_reports_the_short_commit():
+    commit, dirty = chat_eval.git_state()
+    assert commit != "unknown"
+    assert 4 <= len(commit) <= 40
+    assert isinstance(dirty, bool)

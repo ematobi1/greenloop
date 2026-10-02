@@ -41,7 +41,6 @@
       "Edit(~/AppData/Local/GreenLoop/**)"
     ],
     "ask": [
-      "Bash(git commit:*)",
       "Bash(git switch:*)",
       "Bash(git checkout:*)",
       "Bash(git rebase:*)",
@@ -50,7 +49,6 @@
       "Bash(npm install:*)",
       "Bash(docker run:*)",
       "Bash(docker rm:*)",
-      "PowerShell(git commit *)",
       "PowerShell(git switch *)",
       "PowerShell(git checkout *)",
       "PowerShell(git rebase *)",
