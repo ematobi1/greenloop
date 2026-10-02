@@ -456,7 +456,7 @@ class TestToolPermissionArguments:
         "value", [float("nan"), float("inf"), -float("inf"), [1, float("nan")]]
     )
     def test_non_finite_numbers_are_refused(self, payloads, value):
-        with pytest.raises(ValidationError, match="NaN or Infinity"):
+        with pytest.raises(ValidationError, match="strict JSON"):
             ToolPermission.model_validate({**payloads["ToolPermission"], "arguments": {"x": value}})
 
     def test_arguments_are_capped_in_utf8_bytes(self, payloads):
@@ -467,4 +467,10 @@ class TestToolPermissionArguments:
         with pytest.raises(ValidationError, match="at most"):
             ToolPermission.model_validate(
                 {**payloads["ToolPermission"], "arguments": {"t": "x" * MAX_ARGUMENT_BYTES}}
+            )
+
+    def test_an_integer_too_long_to_print_is_refused_with_the_right_reason(self, payloads):
+        with pytest.raises(ValidationError, match="integer over 4300 digits"):
+            ToolPermission.model_validate(
+                {**payloads["ToolPermission"], "arguments": {"n": 10**5000}}
             )

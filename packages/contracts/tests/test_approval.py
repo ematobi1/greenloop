@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from pydantic import ValidationError
@@ -154,3 +154,54 @@ LATE = "2026-09-27T12:30:00Z"
 def test_each_rule_refuses_for_its_own_reason(payloads, changes, reason):
     with pytest.raises(ValidationError, match=reason):
         _approval(payloads, **changes)
+
+
+AT = datetime(2026, 9, 27, 12, 5, tzinfo=UTC)
+
+
+def test_decide_and_consume_move_an_approval_through_its_states(payloads):
+    approved = _approval(payloads).decide(approved=True, decided_by="user-1", at=AT)
+    assert (approved.status, approved.decided_at, approved.updated_at) == ("approved", AT, AT)
+    consumed = approved.consume(at=AT + timedelta(minutes=1))
+    assert consumed.status is ApprovalStatus.CONSUMED
+    rejected = _approval(payloads).decide(approved=False, decided_by="user-1", at=AT)
+    assert rejected.status is ApprovalStatus.REJECTED
+
+
+@pytest.mark.parametrize(
+    ("change", "reason"),
+    [
+        (lambda a: a.decide(approved=True, decided_by="user-2", at=AT), "owning principal"),
+        (
+            lambda a: a.decide(approved=True, decided_by="user-1", at=AT + timedelta(hours=1)),
+            "expires",
+        ),
+        (lambda a: a.consume(at=AT), "only an approved"),
+        (
+            lambda a: a.decide(approved=True, decided_by="user-1", at=AT).decide(
+                approved=False, decided_by="user-1", at=AT
+            ),
+            "only a pending",
+        ),
+        (
+            lambda a: a.decide(approved=False, decided_by="user-1", at=AT).consume(at=AT),
+            "only an approved",
+        ),
+        (
+            lambda a: a.decide(approved=True, decided_by="user-1", at=AT).consume(
+                at=AT + timedelta(minutes=30)
+            ),
+            "expires",
+        ),
+    ],
+)
+def test_the_helpers_refuse_changes_that_break_a_rule(payloads, change, reason):
+    with pytest.raises(ValueError, match=reason):
+        change(_approval(payloads))
+
+
+@pytest.mark.parametrize("field", ["created_at", "updated_at"])
+def test_created_and_updated_times_are_required(payloads, field):
+    payload = {k: v for k, v in payloads["Approval"].items() if k != field}
+    with pytest.raises(ValidationError, match=field):
+        Approval.model_validate(payload)
