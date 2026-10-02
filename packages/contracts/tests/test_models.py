@@ -432,3 +432,45 @@ class TestAuditRecord:
     def test_rejects_malformed_hash(self, payloads, bad_hash):
         with pytest.raises(ValidationError):
             AuditRecord.model_validate({**payloads["AuditRecord"], "operation_hash": bad_hash})
+
+
+class TestAgentModelAccess:
+    def test_defaults_to_no_model_access(self, payloads):
+        assert Agent.model_validate(payloads["Agent"]).model_access is False
+
+    def test_model_access_can_be_declared(self, payloads):
+        agent = Agent.model_validate({**payloads["Agent"], "model_access": True})
+        assert agent.model_access is True
+
+    @pytest.mark.parametrize("value", ["true", "yes", 1, None])
+    def test_model_access_is_a_strict_boolean(self, payloads, value):
+        with pytest.raises(ValidationError):
+            Agent.model_validate({**payloads["Agent"], "model_access": value})
+
+    def test_agent_schema_is_version_3(self):
+        assert Agent.schema_version == "3"
+
+
+class TestToolPermissionArguments:
+    @pytest.mark.parametrize(
+        "value", [float("nan"), float("inf"), -float("inf"), [1, float("nan")]]
+    )
+    def test_non_finite_numbers_are_refused(self, payloads, value):
+        with pytest.raises(ValidationError, match="strict JSON"):
+            ToolPermission.model_validate({**payloads["ToolPermission"], "arguments": {"x": value}})
+
+    def test_arguments_are_capped_in_utf8_bytes(self, payloads):
+        from greenloop_contracts.tool_permission import MAX_ARGUMENT_BYTES
+
+        fits = {"t": "é" * (MAX_ARGUMENT_BYTES // 2 - 10)}
+        assert ToolPermission.model_validate({**payloads["ToolPermission"], "arguments": fits})
+        with pytest.raises(ValidationError, match="at most"):
+            ToolPermission.model_validate(
+                {**payloads["ToolPermission"], "arguments": {"t": "x" * MAX_ARGUMENT_BYTES}}
+            )
+
+    def test_an_integer_too_long_to_print_is_refused_with_the_right_reason(self, payloads):
+        with pytest.raises(ValidationError, match="integer over 4300 digits"):
+            ToolPermission.model_validate(
+                {**payloads["ToolPermission"], "arguments": {"n": 10**5000}}
+            )

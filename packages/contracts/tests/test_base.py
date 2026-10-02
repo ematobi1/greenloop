@@ -78,6 +78,18 @@ def test_agent_identifier_accepts_well_formed_values(good_id, payloads):
     assert Agent.model_validate({**payloads["Agent"], "agent_id": good_id}).agent_id == good_id
 
 
+EVERY_TIMESTAMP_SET = {
+    "Approval": {
+        "status": "consumed",
+        "decided_by": "user-1",
+        "decided_at": "2026-09-27T12:01:00Z",
+        "consumed_at": "2026-09-27T12:02:00Z",
+        "updated_at": "2026-09-27T12:02:00Z",
+    }
+}
+"""Optional timestamps a payload must carry so every timestamp field is exercised."""
+
+
 class TestTimestamps:
     def test_naive_timestamp_is_rejected(self, payloads):
         with pytest.raises(ValidationError, match="timezone"):
@@ -109,6 +121,7 @@ class TestTimestamps:
     def test_every_timestamp_field_is_known(self):
         assert _timestamp_fields() == {
             "Agent": {"created_at", "updated_at"},
+            "Approval": {"decided_at", "consumed_at", "expires_at", "created_at", "updated_at"},
             "AuditRecord": {"occurred_at"},
             "Dispatch": {"dispatched_at"},
             "ErrorReport": {"occurred_at"},
@@ -123,11 +136,11 @@ class TestTimestamps:
     @pytest.mark.parametrize("name", NAMES)
     def test_every_timestamp_field_normalizes_plus_two_hours_to_z(self, name, payloads):
         fields = _timestamp_fields()[name]
-        shifted = dict(payloads[name])
+        shifted = dict(payloads[name]) | EVERY_TIMESTAMP_SET.get(name, {})
         for field in fields:
             instant = (
                 datetime.fromisoformat("2026-10-01T00:00:00+00:00")
-                if field == "expires_at"
+                if field == "expires_at" and not shifted.get(field)
                 else None
             )
             original = instant or datetime.fromisoformat(shifted[field])
@@ -159,13 +172,14 @@ class TestSchemaExport:
         titles = [entry["schema"]["title"] for entry in json_schemas().values()]
         assert len(titles) == len(set(titles))
 
-    def test_changed_contracts_are_at_schema_version_2(self):
+    def test_contract_schema_versions(self):
         versions = {name: model.schema_version for name, model in CONTRACTS.items()}
         assert versions == {
-            "Agent": "2",
+            "Agent": "3",
+            "Approval": "1",
             "Task": "2",
             "Dispatch": "2",
-            "ToolPermission": "1",
+            "ToolPermission": "2",
             "ToolGrant": "1",
             "MemoryRecord": "2",
             "Event": "2",

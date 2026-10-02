@@ -1,5 +1,8 @@
 """Agent: how a specialized agent registers with the orchestrator.
 
+`allowed_tools` and `model_access` declare what the agent can reach; an agent with
+either needs a dispatch permission check before it can be registered.
+
 `domain` is a closed set on purpose: a new domain is a reviewed contract change,
 not a value an agent can invent.
 """
@@ -7,7 +10,7 @@ not a value an agent can invent.
 from enum import StrEnum
 from typing import Annotated
 
-from pydantic import Field, StringConstraints, field_validator, model_validator
+from pydantic import Field, StrictBool, StringConstraints, field_validator, model_validator
 
 from greenloop_contracts.base import (
     AgentIdentifier,
@@ -36,7 +39,7 @@ class AgentStatus(StrEnum):
 
 
 class Agent(ContractModel):
-    schema_version = "2"
+    schema_version = "3"
 
     agent_id: AgentIdentifier
     name: ShortText
@@ -45,6 +48,9 @@ class Agent(ContractModel):
     description: LongText = ""
     capabilities: tuple[Identifier, ...] = Field(min_length=1)
     allowed_tools: tuple[Identifier, ...] = ()
+    model_access: StrictBool = False
+    """Whether the agent calls a model. With allowed_tools, this decides whether a
+    dispatch needs a permission check."""
     status: AgentStatus = AgentStatus.REGISTERED
     created_at: Timestamp
     updated_at: Timestamp

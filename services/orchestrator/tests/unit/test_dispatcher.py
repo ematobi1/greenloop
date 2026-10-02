@@ -7,6 +7,7 @@ from sqlalchemy import select
 
 from app.agents.reference import EchoReferenceAgent
 from app.agents.registry import AgentRegistry
+from app.core.auth import Principal
 from app.db.models import AuditRecordRow
 from app.memory import execution
 from app.memory.execution import ExecutionMemoryStatus
@@ -47,26 +48,26 @@ class _WrongDispatchAgent(EchoReferenceAgent):
 
 def test_a_timeout_becomes_a_failed_result(item):
     quick = item.model_copy(update={"timeout_ms": 20})
-    result = asyncio.run(dispatcher.run(_SlowAgent(), quick))
+    result = asyncio.run(dispatcher._run(_SlowAgent(), quick))
     assert result.status is ExecutionStatus.FAILED
     assert result.error.code == "AGENT_TIMEOUT"
     assert result.dispatch_id == item.dispatch_id
 
 
 def test_an_agent_exception_becomes_a_user_safe_failed_result(item):
-    result = asyncio.run(dispatcher.run(_CrashingAgent(), item))
+    result = asyncio.run(dispatcher._run(_CrashingAgent(), item))
     assert result.error.code == "AGENT_FAILED"
     assert "secret" not in result.model_dump_json()
 
 
 def test_a_result_for_another_dispatch_is_refused(item):
-    result = asyncio.run(dispatcher.run(_WrongDispatchAgent(), item))
+    result = asyncio.run(dispatcher._run(_WrongDispatchAgent(), item))
     assert result.error.code == "AGENT_INVALID_RESULT"
     assert result.dispatch_id == item.dispatch_id
 
 
 def test_recording_the_same_dispatch_twice_is_already_recorded(item, session_factory):
-    result = asyncio.run(dispatcher.run(EchoReferenceAgent(), item))
+    result = asyncio.run(dispatcher._run(EchoReferenceAgent(), item))
     statuses = []
     for _ in range(2):
         with session_factory() as session:
@@ -76,7 +77,7 @@ def test_recording_the_same_dispatch_twice_is_already_recorded(item, session_fac
 
 
 def test_a_deleted_execution_record_still_counts_as_already_recorded(item, session_factory):
-    result = asyncio.run(dispatcher.run(EchoReferenceAgent(), item))
+    result = asyncio.run(dispatcher._run(EchoReferenceAgent(), item))
     with session_factory() as session:
         execution.record_execution(session, "req-1", item, result)
         MemoryStore(session, "req-1").delete(
@@ -89,7 +90,7 @@ def test_a_deleted_execution_record_still_counts_as_already_recorded(item, sessi
 
 
 def test_the_execution_record_holds_observed_facts_only(item):
-    result = asyncio.run(dispatcher.run(EchoReferenceAgent(), item))
+    result = asyncio.run(dispatcher._run(EchoReferenceAgent(), item))
     record = execution.execution_record(item, result)
     assert json.loads(record.content) == {
         "dispatch_id": item.dispatch_id,
@@ -106,7 +107,7 @@ def test_the_execution_record_holds_observed_facts_only(item):
 
 
 def test_record_falls_back_to_the_audit_entry_alone(item, session_factory, monkeypatch):
-    result = asyncio.run(dispatcher.run(EchoReferenceAgent(), item))
+    result = asyncio.run(dispatcher._run(EchoReferenceAgent(), item))
 
     def broken(*args, **kwargs):
         raise RuntimeError("boom")
@@ -123,7 +124,7 @@ def test_record_falls_back_to_the_audit_entry_alone(item, session_factory, monke
 
 
 def test_record_never_raises_even_without_a_database(item):
-    result = asyncio.run(dispatcher.run(EchoReferenceAgent(), item))
+    result = asyncio.run(dispatcher._run(EchoReferenceAgent(), item))
 
     def no_database():
         raise ConnectionError("down")
@@ -143,17 +144,17 @@ class _InnerTimeoutAgent(EchoReferenceAgent):
 
 
 def test_a_result_of_the_wrong_type_is_an_invalid_result(item):
-    result = asyncio.run(dispatcher.run(_NoneAgent(), item))
+    result = asyncio.run(dispatcher._run(_NoneAgent(), item))
     assert result.error.code == "AGENT_INVALID_RESULT"
 
 
 def test_a_timeout_inside_the_agent_is_a_failure_not_a_dispatch_timeout(item):
-    result = asyncio.run(dispatcher.run(_InnerTimeoutAgent(), item))
+    result = asyncio.run(dispatcher._run(_InnerTimeoutAgent(), item))
     assert result.error.code == "AGENT_FAILED"
 
 
 def test_agent_failures_log_the_exception_type_but_not_its_message(item, caplog):
-    asyncio.run(dispatcher.run(_CrashingAgent(), item))
+    asyncio.run(dispatcher._run(_CrashingAgent(), item))
     logged = caplog.text
     assert "RuntimeError" in logged
     assert "secret" not in logged
@@ -171,7 +172,7 @@ def test_a_cancelled_dispatch_is_recorded_as_cancelled_before_cancelling(
             dispatcher.dispatch(
                 registry,
                 session_factory,
-                principal_id="user-1",
+                principal=Principal(principal_id="user-1", display_name="User"),
                 correlation_id="req-1",
                 agent_id="echo-reference-agent",
                 task_id="task-1",
@@ -206,7 +207,7 @@ def test_a_second_cancellation_does_not_lose_the_cancelled_record(session_factor
             dispatcher.dispatch(
                 registry,
                 session_factory,
-                principal_id="user-1",
+                principal=Principal(principal_id="user-1", display_name="User"),
                 correlation_id="req-1",
                 agent_id="echo-reference-agent",
                 task_id="task-1",
@@ -243,6 +244,6 @@ class _PastAgent(EchoReferenceAgent):
 
 @pytest.mark.parametrize("agent", [_FutureAgent(), _PastAgent()])
 def test_times_outside_the_observed_window_are_an_invalid_result(item, agent):
-    result = asyncio.run(dispatcher.run(agent, item))
+    result = asyncio.run(dispatcher._run(agent, item))
     assert result.error.code == "AGENT_INVALID_RESULT"
     assert result.finished_at.year != 2099

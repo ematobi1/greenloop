@@ -10,6 +10,8 @@ from app.agents.registry import (
     UnknownAgentError,
     build_agent_registry,
 )
+from app.core.auth import Principal
+from app.db.models import PrincipalRole
 from greenloop_contracts import AgentDomain, AgentStatus, Dispatch, ExecutionStatus
 
 
@@ -73,16 +75,15 @@ class _ToolUsingAgent(EchoReferenceAgent):
 
 def test_an_agent_with_tool_access_is_refused_without_a_dispatch_permission_check():
     registry = AgentRegistry()
-    with pytest.raises(AgentRegistrationError, match="declares tool access") as raised:
+    with pytest.raises(AgentRegistrationError, match=r"tools github.open_pr") as raised:
         registry.register(_ToolUsingAgent())
-    assert "github.open_pr" in str(raised.value)
-    assert "PR5b" in str(raised.value)
+    assert "no dispatch permission check" in str(raised.value)
     with pytest.raises(UnknownAgentError):
         registry.get("tool-agent")
 
 
 def test_an_agent_with_tool_access_registers_once_a_permission_check_exists():
-    registry = AgentRegistry(permission_check=lambda principal_id, agent: False)
+    registry = AgentRegistry(permission_check=lambda principal, agent: False)
     registry.register(_ToolUsingAgent())
     assert registry.get("tool-agent").descriptor.allowed_tools == ("github.open_pr",)
 
@@ -92,9 +93,71 @@ def test_no_registered_agent_declares_tool_access_today():
 
 
 def test_may_dispatch_defers_to_the_check_when_one_exists():
-    allowed = AgentRegistry(permission_check=lambda principal_id, agent: principal_id == "owner")
+    allowed = AgentRegistry(
+        permission_check=lambda principal, agent: principal.principal_id == "owner"
+    )
     allowed.register(_ToolUsingAgent())
     agent = allowed.get("tool-agent")
-    assert allowed.may_dispatch("owner", agent)
-    assert not allowed.may_dispatch("someone-else", agent)
-    assert build_agent_registry().may_dispatch("anyone", EchoReferenceAgent())
+    assert allowed.may_dispatch(_principal("owner"), agent)
+    assert not allowed.may_dispatch(_principal("someone-else"), agent)
+    assert build_agent_registry().may_dispatch(_principal("anyone"), EchoReferenceAgent())
+
+
+class _ModelAgent(EchoReferenceAgent):
+    descriptor = EchoReferenceAgent.descriptor.model_copy(
+        update={"agent_id": "model-agent", "model_access": True}
+    )
+
+
+class _ModelAndToolAgent(EchoReferenceAgent):
+    descriptor = EchoReferenceAgent.descriptor.model_copy(
+        update={"agent_id": "both-agent", "model_access": True, "allowed_tools": ("web.fetch",)}
+    )
+
+
+def test_an_agent_with_model_access_is_refused_without_a_dispatch_permission_check():
+    registry = AgentRegistry()
+    with pytest.raises(AgentRegistrationError, match="can reach a model but"):
+        registry.register(_ModelAgent())
+    with pytest.raises(UnknownAgentError):
+        registry.get("model-agent")
+
+
+def test_an_agent_with_model_and_tool_access_names_both():
+    with pytest.raises(AgentRegistrationError, match=r"tools web.fetch and a model"):
+        AgentRegistry().register(_ModelAndToolAgent())
+
+
+@pytest.mark.parametrize("agent", [_ModelAgent(), _ToolUsingAgent(), _ModelAndToolAgent()])
+def test_agents_with_model_or_tool_access_register_once_a_check_exists(agent):
+    registry = AgentRegistry(permission_check=lambda principal, descriptor: True)
+    registry.register(agent)
+    assert registry.get(agent.descriptor.agent_id) is agent
+
+
+def test_an_agent_with_no_access_registers_without_a_check():
+    registry = AgentRegistry()
+    registry.register(EchoReferenceAgent())
+    assert registry.may_dispatch(_principal("anyone"), registry.get("echo-reference-agent"))
+
+
+def test_without_a_check_may_dispatch_refuses_anything_that_needs_one():
+    registry = AgentRegistry()
+    assert not registry.may_dispatch(_principal("anyone"), _ModelAgent())
+
+
+def test_the_default_registry_uses_the_permission_model_check():
+    from app.permissions import dispatch as dispatch_permission
+
+    assert build_agent_registry()._permission_check is dispatch_permission.may_dispatch
+
+
+def test_the_registry_and_the_check_share_one_definition_of_who_needs_it():
+    from app.agents import registry
+    from app.permissions import dispatch as dispatch_permission
+
+    assert registry.needs_dispatch_permission is dispatch_permission.needs_dispatch_permission
+
+
+def _principal(principal_id: str, role: PrincipalRole = PrincipalRole.USER) -> Principal:
+    return Principal(principal_id=principal_id, display_name=principal_id, role=role)

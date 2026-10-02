@@ -5,6 +5,15 @@ import pytest
 T0 = "2026-09-27T12:00:00Z"
 T1 = "2026-09-27T12:00:05Z"
 HASH = "a" * 64
+OPERATION = {
+    "principal_id": "user-1",
+    "agent_id": "coding-agent",
+    "tool": "github",
+    "operation": "create_issue",
+    "arguments": {"repo": "greenloop", "title": "Bug"},
+    "consequence": "write",
+}
+OPERATION_HASH = "17c829db5af640011bbb7c76334a7538a7386c0b318cf0af2e4481a463294815"
 
 
 def valid_payloads() -> dict[str, dict[str, Any]]:
@@ -43,6 +52,16 @@ def valid_payloads() -> dict[str, dict[str, Any]]:
             "operation": "create_issue",
             "arguments": {"repo": "greenloop", "title": "Bug"},
             "consequence": "write",
+        },
+        "Approval": {
+            "approval_id": "appr-1",
+            "principal_id": "user-1",
+            "operation": OPERATION,
+            "operation_hash": OPERATION_HASH,
+            "summary": "Open an issue in greenloop",
+            "expires_at": "2026-09-27T12:15:00Z",
+            "created_at": T0,
+            "updated_at": T0,
         },
         "ToolGrant": {
             "grant_id": "grant-1",

@@ -9,8 +9,6 @@ from app.approval_binding import (
     ApprovalMismatchError,
     ApprovalNotFoundError,
     InMemoryApprovalStore,
-    canonicalize,
-    operation_hash,
 )
 
 NOW = datetime(2026, 9, 27, 12, 0, tzinfo=UTC)
@@ -20,44 +18,6 @@ LATER = NOW + timedelta(minutes=10)
 @pytest.fixture
 def store() -> InMemoryApprovalStore:
     return InMemoryApprovalStore()
-
-
-class TestCanonicalHash:
-    def test_argument_order_does_not_change_hash(self, permission):
-        first = permission(repo="greenloop", title="Bug")
-        second = permission(title="Bug", repo="greenloop")
-        assert operation_hash(first) == operation_hash(second)
-
-    def test_canonical_form_is_compact_sorted_utf8(self, permission):
-        canonical = canonicalize(permission(title="café"))
-        assert b" " not in canonical.replace(b"create_issue", b"")
-        assert "café".encode() in canonical
-        assert canonical.index(b'"arguments"') < canonical.index(b'"tool"')
-
-    @pytest.mark.parametrize(
-        "change",
-        [
-            {"title": "Bug!"},
-            {"title": "Bug", "labels": ["x"]},
-            {"repo": "other"},
-        ],
-    )
-    def test_any_argument_change_changes_hash(self, permission, change):
-        original = permission(repo="greenloop", title="Bug")
-        changed = permission(**{"repo": "greenloop", "title": "Bug", **change})
-        assert operation_hash(original) != operation_hash(changed)
-
-    def test_principal_and_operation_are_bound(self, permission):
-        base = operation_hash(permission())
-        assert base != operation_hash(permission(principal_id="user-2"))
-        assert base != operation_hash(permission(operation="create_pull_request"))
-        assert base != operation_hash(permission(consequence="send"))
-
-    def test_hash_is_lowercase_sha256_hex(self, permission):
-        digest = operation_hash(permission())
-        assert len(digest) == 64
-        assert digest == digest.lower()
-        int(digest, 16)
 
 
 class TestSingleUse:

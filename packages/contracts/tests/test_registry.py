@@ -16,6 +16,7 @@ EXPECTED = {
     "Dispatch",
     "ToolPermission",
     "ToolGrant",
+    "Approval",
     "MemoryRecord",
     "Event",
     "ExecutionResult",
@@ -24,7 +25,7 @@ EXPECTED = {
 }
 
 
-def test_registry_holds_exactly_the_ten_contracts():
+def test_registry_holds_exactly_the_eleven_contracts():
     assert set(CONTRACTS) == EXPECTED
 
 
