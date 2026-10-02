@@ -58,6 +58,12 @@ services:
     build:
       context: .
       dockerfile: services/broker/Dockerfile
+    environment:
+      # Its own role, with access only to the broker schema (ADR 0009).
+      BROKER_DATABASE_URL: postgresql+psycopg://greenloop_broker:${BROKER_DB_PASSWORD:-}@db:5432/${POSTGRES_DB:-greenloop}
+    depends_on:
+      db:
+        condition: service_healthy
     ports:
       - "127.0.0.1:${GREENLOOP_BROKER_PORT:-8100}:8100"
     healthcheck:
