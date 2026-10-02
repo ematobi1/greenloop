@@ -77,7 +77,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 4. **Reasoning** (`orchestration/reasoning.py`) interprets the request.
 5. **Planning** (`orchestration/planner.py`) drafts a plan of steps as `Task` contracts.
 6. **Memory retrieval** (`memory/retrieval.py`) fetches relevant records. They pass through `memory/context_builder.py` before any prompt sees them.
-7. **Agent dispatch** (`orchestration/dispatcher.py`) sends each step to an agent as a `Dispatch`.
+7. **Agent dispatch** (`orchestration/dispatcher.py`) runs a step on an agent as a `Dispatch`. Today only `POST /v1/dispatches` calls it; the planner will in phase 4.
 8. **Permission check** (`permissions/policy.py`) evaluates the requested `ToolPermission`.
 9. **Approval if needed** (`permissions/approvals.py`) asks a human and binds the approval to the SHA256 of the exact operation.
 10. **Broker** (`tools/broker_client.py` to `services/broker`) re-checks policy, consumes the approval once, writes the ledger entry and forwards the call.
