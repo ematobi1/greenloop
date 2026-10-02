@@ -26,3 +26,7 @@ cd services\orchestrator
 ```
 
 `--provider ollama` targets a local model; `--limit N` runs the first N cases (the run then can't pass). `--rescore report.jsonl` scores saved replies against the current checks with no model calls; cases missing from the report fail the run. Exit code 0 is pass, 1 is fail, 2 means no provider is configured. The dataset and scorer are gate-tested without a model in `services/orchestrator/tests/unit/test_chat_eval.py`.
+
+### Results history
+
+Every paid run writes `results/<UTC date>-<short commit>.json`. A later run on the same day and commit gets `-2`, `-3` and so on; nothing is overwritten. `--rescore` writes nothing. Each file records the date, commit, whether the tree was dirty, provider, model, pass rate and threshold, the safety gate result, unscored cases, token totals, and each case's id, category, pass/fail and error code. It holds no reply text, prompts, memory or failure messages, so it is safe to commit: commit each file with the change it measured. The full replies only go to `--out`, which should stay outside the repo.
