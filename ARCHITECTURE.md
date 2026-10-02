@@ -138,7 +138,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 | `orchestration/` | Reasoning, planner, dispatcher (runs one `Dispatch` on one agent, records execution memory and audit) | 2 (reasoning, planner), 4 (dispatcher) |
 | `memory/` | Store, retrieval, context builder, provenance, execution memory, embeddings | 1 (context builder), 2 |
 | `agents/` | Agent base, in-code registry, deterministic reference agents; planner, research and coding agents (stubs) | 4 |
-| `permissions/` | Policy evaluation and approval requests | 3 |
+| `permissions/` | Policy evaluation, approval requests, and dispatch permission (`dispatch.py`: who may run an agent with model or tool access) | 3 |
 | `tools/` | Tool registry and broker client | 3 |
 | `workflows/` | Workflow engine and queue | 4 |
 | `correction/` | Self-correction lifecycle | 4 |

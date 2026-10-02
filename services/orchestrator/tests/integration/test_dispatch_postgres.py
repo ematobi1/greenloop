@@ -62,7 +62,7 @@ def test_recording_a_dispatch_twice_is_already_recorded_on_postgres(
         correlation_id="it",
         dispatched_at=datetime.now(UTC),
     )
-    result = asyncio.run(dispatcher.run(EchoReferenceAgent(), item))
+    result = asyncio.run(dispatcher._run(EchoReferenceAgent(), item))
     statuses = []
     for _ in range(2):
         with pg_session_factory() as session:

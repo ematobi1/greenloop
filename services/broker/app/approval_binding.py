@@ -1,21 +1,20 @@
 """Approval binding: an approval allows one exact operation, once.
 
-The operation is canonicalized (sorted keys, no whitespace, UTF-8, no NaN) and
-hashed with SHA256. Consuming an approval checks principal, expiry and hash,
-then marks it used under a lock, so two concurrent calls cannot both succeed.
-A mismatched or expired attempt is refused without consuming the approval.
+The operation is hashed with greenloop_contracts.operation_hash (canonical JSON,
+SHA256), the one definition every service shares. Consuming an approval checks
+principal, expiry and hash, then marks it used under a lock, so two concurrent calls
+cannot both succeed. A mismatched or expired attempt is refused without consuming
+the approval.
 
 TODO(phase-3): Postgres-backed store where consume is a single
 `UPDATE ... WHERE consumed_at IS NULL ... RETURNING` statement.
 """
 
-import hashlib
-import json
 import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from greenloop_contracts import ToolPermission
+from greenloop_contracts import ToolPermission, operation_hash
 
 
 class ApprovalError(Exception):
@@ -36,17 +35,6 @@ class ApprovalMismatchError(ApprovalError):
 
 class ApprovalExpiredError(ApprovalError):
     pass
-
-
-def canonicalize(permission: ToolPermission) -> bytes:
-    payload = permission.model_dump(mode="json")
-    return json.dumps(
-        payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
-    ).encode("utf-8")
-
-
-def operation_hash(permission: ToolPermission) -> str:
-    return hashlib.sha256(canonicalize(permission)).hexdigest()
 
 
 @dataclass
