@@ -42,12 +42,17 @@ PR5b adds an `Approval` contract in contracts 0.3.0, a Postgres approval store a
 - The orchestrator can read and decide approvals only through the broker API, so a bug in the orchestrator can't mark an approval consumed.
 - Each service runs its own migrations as its own role. The bootstrap superuser is needed only for the bootstrap and ownership scripts.
 
+## Tracked items (accepted by Terry 2026-10-02 for PR5b-2; must be fixed before Phase 3)
+
+| Item | Must be fixed | Issue |
+|---|---|---|
+| **Split each service into a migration-owner role and a runtime role with minimal grants**, so a runtime role can't disable the `audit_events` append-only trigger (or `audit_records` in the orchestrator). Today each service's role runs its own migrations and therefore owns its audit table. | Before Phase 3, before any tool executes through an approval | to be filed |
+| **Scope service tokens.** Any valid token can act for any principal on every approvals route. Only the orchestrator holds one today; a token must carry the scopes it may use (for example `approvals:act_for_user`) before a second service gets one. | Before Phase 3, and before any second service is issued a token | to be filed |
+
 ## Known gaps
 
 - No end-to-end test runs the orchestrator against a real broker; each side is tested against a fake of the other, because both services use a top-level `app` package.
 - The orchestrator audits consume only once the phase 3 tool path calls it; until then only the broker audits consume.
-- **Runtime roles own their tables.** Each service's role runs its own migrations, so it owns its audit table and could disable the append-only trigger. Splitting a migration (owner) role from a runtime role with only the grants it needs closes this; open decision.
-- **Service tokens are not scoped.** Any valid token can act for any principal. Only the orchestrator holds one today; scopes are needed before a second service gets a token.
 - **The dispatch flag is a context variable.** It follows tasks, not `run_in_executor` or new threads. Agents don't reach the approvals service today; if a tool path ever runs agent code in a thread, it must carry the flag explicitly.
 - **Stored approvals depend on the hash staying stable.** Every read recomputes `operation_hash` from the stored operation; a future change to `ToolPermission` serialization would make old rows unreadable, so such a change needs a migration of stored approvals.
 - The broker serves `/docs` and `/openapi.json` without authentication; turn them off before any non-local deployment.
