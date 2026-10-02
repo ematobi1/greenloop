@@ -1,8 +1,8 @@
 """Approval requests: ask a human to allow one exact consequential operation.
 
-The canonical SHA256 binding and single-use consumption live in the broker
-(services/broker/app/approval_binding.py). This module creates the request and
-records the human decision.
+The operation's SHA256 is greenloop_contracts.operation_hash; storage and single-use
+consumption live in the broker (ADR 0009). This module will create the request and
+record the human decision through the broker (PR5b-2).
 """
 
 from greenloop_contracts import ToolPermission

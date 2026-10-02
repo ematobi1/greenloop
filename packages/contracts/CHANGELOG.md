@@ -6,14 +6,15 @@ Adds what PR5b needs: approvals owned by the broker (ADR 0009) and a way for an 
 
 ### Added
 
-- **Approval** (schema v1): a human's permission for one exact `ToolPermission`, used at most once. It carries the operation and its `operation_hash`; the hash must match the operation and the operation must belong to the approval's `principal_id`. `status` is pending, approved, rejected, consumed or expired, and `decided_by`/`decided_at`/`consumed_at` must agree with it. `expires_at` must be after `created_at`; `DEFAULT_APPROVAL_TTL` is 15 minutes.
+- **Approval** (schema v1): a human's permission for one exact `ToolPermission`, used at most once. It carries the operation and its `operation_hash`; the hash must match the operation, the operation must belong to the approval's `principal_id`, and only that principal can decide (`decided_by == principal_id`). `status` is pending, approved, rejected or consumed, and `decided_by`/`decided_at`/`consumed_at` must agree with it. Expiry is not a status: `expires_at` must be after `created_at` and at most `MAX_APPROVAL_TTL` (24 hours) later, nothing can be decided or consumed at or after it, and the timestamps must be in order. `DEFAULT_APPROVAL_TTL` is 15 minutes.
 - **`canonical_operation` and `operation_hash`** (`operation.py`): the one canonical JSON form (sorted keys, compact, UTF-8, no NaN) and SHA256 of a `ToolPermission`, moved here from the broker so every service computes the same hash. The bytes are unchanged from the broker's previous function and pinned by a test.
 
-### Changed (schema v2 to v3)
+### Changed
 
-| Contract | Changes | Breaking |
-|---|---|---|
-| Agent | new `model_access` (strict boolean, defaults to `false`). With `allowed_tools`, it decides whether dispatching the agent needs a permission check | no (defaulted) |
+| Contract | Schema | Changes | Breaking |
+|---|---|---|---|
+| Agent | v2 to v3 | new `model_access` (strict boolean, defaults to `false`). With `allowed_tools`, it decides whether dispatching the agent needs a permission check | no (defaulted) |
+| ToolPermission | v1 to v2 | `arguments` must be strict JSON (no NaN or Infinity) and at most 64 KiB as UTF-8, so every permission can be hashed | yes (previously accepted values are refused) |
 
 ## 0.2.0 (2026-09-27)
 

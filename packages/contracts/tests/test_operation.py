@@ -72,6 +72,7 @@ class TestCanonicalHash:
         )
         assert operation_hash(permission()) == HASH_OF_DEFAULT
 
-    def test_nan_is_refused(self, permission):
-        with pytest.raises(ValueError):
-            canonical_operation(permission(score=float("nan")))
+    def test_values_are_hashed_as_written_not_normalized(self, permission):
+        assert operation_hash(permission(n=1)) != operation_hash(permission(n=1.0))
+        nfc, nfd = "café", "café"
+        assert operation_hash(permission(title=nfc)) != operation_hash(permission(title=nfd))

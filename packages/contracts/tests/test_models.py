@@ -449,3 +449,22 @@ class TestAgentModelAccess:
 
     def test_agent_schema_is_version_3(self):
         assert Agent.schema_version == "3"
+
+
+class TestToolPermissionArguments:
+    @pytest.mark.parametrize(
+        "value", [float("nan"), float("inf"), -float("inf"), [1, float("nan")]]
+    )
+    def test_non_finite_numbers_are_refused(self, payloads, value):
+        with pytest.raises(ValidationError, match="NaN or Infinity"):
+            ToolPermission.model_validate({**payloads["ToolPermission"], "arguments": {"x": value}})
+
+    def test_arguments_are_capped_in_utf8_bytes(self, payloads):
+        from greenloop_contracts.tool_permission import MAX_ARGUMENT_BYTES
+
+        fits = {"t": "é" * (MAX_ARGUMENT_BYTES // 2 - 10)}
+        assert ToolPermission.model_validate({**payloads["ToolPermission"], "arguments": fits})
+        with pytest.raises(ValidationError, match="at most"):
+            ToolPermission.model_validate(
+                {**payloads["ToolPermission"], "arguments": {"t": "x" * MAX_ARGUMENT_BYTES}}
+            )

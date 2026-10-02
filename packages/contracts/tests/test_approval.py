@@ -11,7 +11,11 @@ from greenloop_contracts import (
     operation_hash,
 )
 
-DECIDED = {"decided_by": "user-1", "decided_at": "2026-09-27T12:01:00Z"}
+DECIDED = {
+    "decided_by": "user-1",
+    "decided_at": "2026-09-27T12:01:00Z",
+    "updated_at": "2026-09-27T12:05:00Z",
+}
 
 
 def _approval(payloads, **changes):
@@ -34,8 +38,6 @@ def test_the_default_lifetime_is_fifteen_minutes():
         {"status": "approved", **DECIDED},
         {"status": "rejected", **DECIDED},
         {"status": "consumed", **DECIDED, "consumed_at": "2026-09-27T12:02:00Z"},
-        {"status": "expired"},
-        {"status": "expired", **DECIDED},
     ],
 )
 def test_valid_status_and_timestamp_combinations(payloads, changes):
@@ -51,7 +53,15 @@ def test_valid_status_and_timestamp_combinations(payloads, changes):
         {"status": "consumed", **DECIDED},
         {"status": "consumed", "consumed_at": "2026-09-27T12:02:00Z"},
         {"status": "approved", **DECIDED, "consumed_at": "2026-09-27T12:02:00Z"},
-        {"status": "expired", "consumed_at": "2026-09-27T12:02:00Z"},
+        {"status": "expired"},
+        {"status": "approved", **DECIDED, "updated_at": "2026-09-27T12:00:30Z"},
+        {
+            "status": "consumed",
+            **DECIDED,
+            "consumed_at": "2026-09-27T12:02:00Z",
+            "updated_at": "2026-09-27T12:01:30Z",
+        },
+        {"expires_at": "2026-09-28T12:00:01Z"},
         {"status": "approved", "decided_by": "user-1"},
         {"status": "approved", "decided_at": "2026-09-27T12:01:00Z"},
         {"status": "approved", "decided_by": "user-1", "decided_at": "2026-09-27T11:00:00Z"},
@@ -99,3 +109,48 @@ def test_approvals_are_immutable(payloads):
     approval = _approval(payloads)
     with pytest.raises(ValidationError):
         approval.status = ApprovalStatus.APPROVED
+
+
+def test_the_longest_allowed_lifetime_is_accepted(payloads):
+    assert _approval(payloads, expires_at="2026-09-28T12:00:00Z")
+
+
+def test_expired_is_not_a_status():
+    assert {s.value for s in ApprovalStatus} == {"pending", "approved", "rejected", "consumed"}
+
+
+LATE = "2026-09-27T12:30:00Z"
+
+
+@pytest.mark.parametrize(
+    ("changes", "reason"),
+    [
+        ({"status": "approved", **DECIDED, "decided_by": "user-2"}, "owning principal"),
+        (
+            {
+                "status": "approved",
+                **DECIDED,
+                "decided_at": "2026-09-27T12:15:00Z",
+                "updated_at": LATE,
+            },
+            "after it expires",
+        ),
+        (
+            {
+                "status": "consumed",
+                **DECIDED,
+                "consumed_at": "2026-09-27T12:20:00Z",
+                "updated_at": LATE,
+            },
+            "after it expires",
+        ),
+        (
+            {"status": "consumed", **DECIDED, "consumed_at": "2026-09-27T12:00:30Z"},
+            "in order",
+        ),
+        ({"status": "approved", **DECIDED, "updated_at": "2026-09-27T12:00:30Z"}, "updated_at"),
+    ],
+)
+def test_each_rule_refuses_for_its_own_reason(payloads, changes, reason):
+    with pytest.raises(ValidationError, match=reason):
+        _approval(payloads, **changes)

@@ -4,6 +4,11 @@ An approval binds to `operation_hash(permission)`. Every service computes it wit
 this one function, so the orchestrator and the broker can't disagree about what was
 approved. Canonical form: the ToolPermission as JSON with sorted keys, no
 whitespace, UTF-8 (not ASCII-escaped), and NaN or Infinity refused.
+
+Values are hashed as written, not normalized: 1 and 1.0 differ, and so do two Unicode
+spellings of the same text (NFC and NFD). The service that builds a ToolPermission
+must pass that same object on to be approved and consumed, never rebuild it from
+display text. Normalizing would change these pinned bytes and every stored hash.
 """
 
 import hashlib

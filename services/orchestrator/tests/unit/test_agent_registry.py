@@ -152,5 +152,12 @@ def test_the_default_registry_uses_the_permission_model_check():
     assert build_agent_registry()._permission_check is dispatch_permission.may_dispatch
 
 
+def test_the_registry_and_the_check_share_one_definition_of_who_needs_it():
+    from app.agents import registry
+    from app.permissions import dispatch as dispatch_permission
+
+    assert registry.needs_dispatch_permission is dispatch_permission.needs_dispatch_permission
+
+
 def _principal(principal_id: str, role: PrincipalRole = PrincipalRole.USER) -> Principal:
     return Principal(principal_id=principal_id, display_name=principal_id, role=role)

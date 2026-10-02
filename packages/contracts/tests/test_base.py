@@ -84,6 +84,7 @@ EVERY_TIMESTAMP_SET = {
         "decided_by": "user-1",
         "decided_at": "2026-09-27T12:01:00Z",
         "consumed_at": "2026-09-27T12:02:00Z",
+        "updated_at": "2026-09-27T12:02:00Z",
     }
 }
 """Optional timestamps a payload must carry so every timestamp field is exercised."""
@@ -139,7 +140,7 @@ class TestTimestamps:
         for field in fields:
             instant = (
                 datetime.fromisoformat("2026-10-01T00:00:00+00:00")
-                if field == "expires_at"
+                if field == "expires_at" and not shifted.get(field)
                 else None
             )
             original = instant or datetime.fromisoformat(shifted[field])
@@ -178,7 +179,7 @@ class TestSchemaExport:
             "Approval": "1",
             "Task": "2",
             "Dispatch": "2",
-            "ToolPermission": "1",
+            "ToolPermission": "2",
             "ToolGrant": "1",
             "MemoryRecord": "2",
             "Event": "2",
