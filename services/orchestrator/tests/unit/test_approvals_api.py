@@ -74,7 +74,7 @@ class FakeBroker:
         )
 
     async def list_approvals(self, **kwargs):
-        return [await self._answer("list", make_approval(kwargs["principal_id"]), **kwargs)]
+        return [await self._answer("list", make_approval(kwargs["principal_id"]), **kwargs)], 42
 
 
 @pytest.fixture
@@ -123,7 +123,7 @@ def test_list_and_get_use_the_principal_from_the_token(api, broker, issue_token)
         headers=auth(token),
     )
     assert listed.status_code == 200
-    assert listed.json()["meta"] == {"total": 1, "limit": 7}
+    assert listed.json()["meta"] == {"total": 42, "limit": 7}
     got = api.get(
         "/v1/approvals/apr-1", params={"principal_id": "someone-else"}, headers=auth(token)
     )
@@ -301,11 +301,16 @@ async def test_request_approval_creates_and_audits(session_factory, broker, issu
     issue_token("user-1")
     principal = Principal("user-1", "User")
     approval = await service.request_approval(
-        broker, session_factory, principal, make_approval().operation, correlation_id="c"
+        broker,
+        session_factory,
+        principal,
+        make_approval().operation,
+        idempotency_key="tool-call-1",
+        correlation_id="c",
     )
     [(_, kwargs)] = broker.calls
     assert kwargs["actor"].principal_id == "user-1"
-    assert kwargs["idempotency_key"].startswith("create-")
+    assert kwargs["idempotency_key"] == "tool-call-1"
     [entry] = audits(session_factory, "approval.create")
     assert (entry.outcome, entry.approval_id) == ("approval_required", approval.approval_id)
 
@@ -319,6 +324,7 @@ async def test_request_approval_refusals_are_audited(session_factory, broker, is
             session_factory,
             Principal("user-1", "User"),
             make_approval().operation,
+            idempotency_key="k",
             correlation_id="c",
         )
     [entry] = audits(session_factory, "approval.create")
@@ -332,6 +338,7 @@ async def test_request_approval_is_only_for_the_principals_own_operation(session
             session_factory,
             Principal("user-2", "User"),
             make_approval("user-1").operation,
+            idempotency_key="k",
             correlation_id="c",
         )
     assert broker.calls == []
@@ -351,3 +358,21 @@ async def test_an_audit_failure_never_hides_the_brokers_result(broker):
         correlation_id="c",
     )
     assert approval.status == "approved"
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"),
+    [
+        (BrokerError(409, "APPROVAL_NOT_PENDING"), "denied"),
+        (BrokerError(None, "BROKER_UNREACHABLE"), "failed"),
+        (BrokerError(503, "UNAVAILABLE"), "failed"),
+        (BrokerError(None, "BROKER_BAD_RESPONSE"), "failed"),
+    ],
+)
+def test_outages_are_audited_as_failed_not_denied(
+    api, broker, issue_token, session_factory, error, outcome
+):
+    broker.error = error
+    api.post("/v1/approvals/apr-1/decisions", json={"approved": True}, headers=auth(issue_token()))
+    [entry] = audits(session_factory, "approval.decide")
+    assert entry.outcome == outcome

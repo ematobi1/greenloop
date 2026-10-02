@@ -103,14 +103,18 @@ class BrokerClient:
         correlation_id: str,
         status: ApprovalStatus | None = None,
         limit: int = 50,
-    ) -> list[Approval]:
+    ) -> tuple[list[Approval], int]:
         params: dict[str, Any] = {"principal_id": principal_id, "limit": limit}
         if status is not None:
             params["status"] = status.value
         data = await self._get("/v1/approvals", params, correlation_id)
-        if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        try:
+            items, total = data["data"], data["meta"]["total"]
+        except (KeyError, TypeError):
+            raise BrokerError(None, "BROKER_BAD_RESPONSE") from None
+        if not isinstance(items, list) or not isinstance(total, int) or isinstance(total, bool):
             raise BrokerError(None, "BROKER_BAD_RESPONSE")
-        return [_approval(item) for item in data["data"]]
+        return [_approval(item) for item in items], total
 
     async def execute(self, permission: ToolPermission, approval_id: str | None) -> ExecutionResult:
         raise NotImplementedError("TODO(phase-3): POST to broker with correlation id")

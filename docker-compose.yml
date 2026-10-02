@@ -7,10 +7,10 @@
 #   docker compose up -d                    # db, orchestrator, broker, web
 #   docker compose --profile tools up -d    # also the GitHub MCP server
 
-x-app-env: &app-env
-  env_file:
-    - path: .env
-      required: false
+# No env_file: compose reads .env only to fill the ${...} values below, and each service
+# gets just the variables it needs. The orchestrator never sees the broker's database
+# password or the bootstrap superuser's, and the broker never sees the orchestrator's
+# secrets (ADR 0009 rule 1).
 
 services:
   db:
@@ -30,7 +30,6 @@ services:
       retries: 20
 
   orchestrator:
-    <<: *app-env
     build:
       context: .
       dockerfile: services/orchestrator/Dockerfile
@@ -41,6 +40,23 @@ services:
       BROKER_URL: http://broker:8100
       ALLOWED_HOSTS: '["127.0.0.1","localhost","orchestrator"]'
       CORS_ORIGINS: '["http://127.0.0.1:${GREENLOOP_WEB_PORT:-3000}","http://localhost:${GREENLOOP_WEB_PORT:-3000}"]'
+      BROKER_SERVICE_TOKEN: ${BROKER_SERVICE_TOKEN:-}
+      ENVIRONMENT: ${ENVIRONMENT:-}
+      LOG_LEVEL: ${LOG_LEVEL:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GREENLOOP_CHAT_MODEL: ${GREENLOOP_CHAT_MODEL:-}
+      ANTHROPIC_EFFORT: ${ANTHROPIC_EFFORT:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-}
+      OLLAMA_MODEL: ${OLLAMA_MODEL:-}
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      AI_DEFAULT_PROVIDER: ${AI_DEFAULT_PROVIDER:-}
+      AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-}
+      AI_MAX_RETRIES: ${AI_MAX_RETRIES:-}
+      AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-}
+      AI_CONTEXT_TOKEN_LIMIT: ${AI_CONTEXT_TOKEN_LIMIT:-}
+      AI_HISTORY_MESSAGE_LIMIT: ${AI_HISTORY_MESSAGE_LIMIT:-}
+      AI_MAX_MESSAGE_CHARS: ${AI_MAX_MESSAGE_CHARS:-}
+      AI_MEMORY_RECORD_LIMIT: ${AI_MEMORY_RECORD_LIMIT:-}
     ports:
       - "127.0.0.1:${GREENLOOP_ORCHESTRATOR_PORT:-8000}:8000"
     depends_on:
@@ -55,13 +71,13 @@ services:
       retries: 10
 
   broker:
-    <<: *app-env
     build:
       context: .
       dockerfile: services/broker/Dockerfile
     environment:
       # Its own role, with access only to the broker schema (ADR 0009).
       BROKER_DATABASE_URL: postgresql+psycopg://greenloop_broker:${BROKER_DB_PASSWORD:-}@db:5432/${POSTGRES_DB:-greenloop}
+      APPROVAL_TTL_SECONDS: ${APPROVAL_TTL_SECONDS:-}
     depends_on:
       db:
         condition: service_healthy

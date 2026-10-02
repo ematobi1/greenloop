@@ -12,12 +12,14 @@ else gets 403, audited. Errors use {"error": {"code", "message"}} and never echo
 request values.
 """
 
+import logging
 import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Header, Path, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import StringConstraints, TypeAdapter, ValidationError
+from sqlalchemy.exc import SQLAlchemyError
 
 from app import audit
 from app.approval_store import ApprovalRefusal, ApprovalRefusedError, ApprovalStore
@@ -32,6 +34,7 @@ from greenloop_contracts.base import Identifier
 
 IdentifierText = Annotated[str, StringConstraints(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$")]
 _identifier = TypeAdapter(Identifier)
+logger = logging.getLogger(__name__)
 
 REFUSAL_RESPONSES: dict[ApprovalRefusal, tuple[int, str, str]] = {
     ApprovalRefusal.NOT_FOUND: (404, "APPROVAL_NOT_FOUND", "No such approval."),
@@ -79,17 +82,20 @@ def require_service(
     info = authenticate(engine, presented) if scheme.lower() == "bearer" and presented else None
     if info is not None:
         return info
-    with engine.begin() as connection:
-        audit.record(
-            connection,
-            principal_id="unknown",
-            actor="unknown",
-            action="service_token.authenticate",
-            outcome=AuditOutcome.DENIED,
-            correlation_id=correlation,
-            resource_type="service_token",
-            details={"reason": "invalid" if presented else "missing"},
-        )
+    try:
+        with engine.begin() as connection:
+            audit.record(
+                connection,
+                principal_id="unknown",
+                actor="unknown",
+                action="service_token.authenticate",
+                outcome=AuditOutcome.DENIED,
+                correlation_id=correlation,
+                resource_type="service_token",
+                details={"reason": "invalid" if presented else "missing"},
+            )
+    except SQLAlchemyError:
+        logger.error("auth_refusal_audit_failed correlation_id=%s", correlation)
     raise ApiError(
         401, "UNAUTHENTICATED", "A valid service token is required.", {"WWW-Authenticate": "Bearer"}
     )
@@ -157,11 +163,11 @@ def list_approvals(
     status: Annotated[ApprovalStatus | None, Query()] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
 ) -> dict:
-    data = [
-        a.model_dump(mode="json")
-        for a in approvals.list_for(principal_id, status=status, limit=limit)
-    ]
-    return {"data": data, "meta": {"total": len(data)}}
+    items, total = approvals.list_for(principal_id, status=status, limit=limit)
+    return {
+        "data": [a.model_dump(mode="json") for a in items],
+        "meta": {"total": total, "limit": limit},
+    }
 
 
 @router.get("/{approval_id}")

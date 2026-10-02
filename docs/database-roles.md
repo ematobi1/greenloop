@@ -8,7 +8,7 @@ Each service connects to Postgres as its own role and owns its own schema ([ADR 
 | `greenloop_broker` | schema `broker` (approvals, audit_events, service_tokens) | schema `public` | broker (`BROKER_DATABASE_URL`) |
 | `POSTGRES_USER` (bootstrap superuser) | everything | — | only the two scripts below |
 
-Neither service role can create databases or roles, replicate, or bypass row security. Passwords and tokens never go in a file other than your local `.env`, and never on a command line. All commands run from the repo root in PowerShell.
+Neither service role can create databases or roles, replicate, or bypass row security. Compose passes each container only its own variables (no shared `env_file`), so the orchestrator never receives the broker's password or the superuser's, and the broker never receives the orchestrator's. Passwords and tokens never go in a file other than your local `.env`, and never on a command line. All commands run from the repo root in PowerShell.
 
 ## First-time setup (or a fresh database)
 

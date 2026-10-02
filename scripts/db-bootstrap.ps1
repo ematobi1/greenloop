@@ -76,7 +76,10 @@ try {
     $target = Resolve-DbContainer $root $Container
     # psql interpolates :'variable' client side, so the set_config statements carry the
     # password: logging goes off first. \o /dev/null hides set_config's echoed result.
+    # Terse errors with no CONTEXT keep a failed CREATE/ALTER ROLE from printing its text.
     $script = @(
+        '\set VERBOSITY terse'
+        '\set SHOW_CONTEXT never'
         'BEGIN;'
         "SET log_statement = 'none';"
         'SET log_min_duration_statement = -1;'

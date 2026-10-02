@@ -213,11 +213,11 @@ def test_get_and_list_are_owner_scoped(client, token, owner):
     assert other.status_code == 404
     assert other.json()["error"]["code"] == "APPROVAL_NOT_FOUND"
     listed = client.get("/v1/approvals", params={"principal_id": owner}, headers=headers(token))
-    assert listed.json() == {"data": [approval], "meta": {"total": 1}}
+    assert listed.json() == {"data": [approval], "meta": {"total": 1, "limit": 50}}
     empty = client.get(
         "/v1/approvals", params={"principal_id": "someone-else"}, headers=headers(token)
     )
-    assert empty.json() == {"data": [], "meta": {"total": 0}}
+    assert empty.json() == {"data": [], "meta": {"total": 0, "limit": 50}}
 
 
 def test_list_filters_by_status_and_bounds_the_limit(client, token, owner):
@@ -338,3 +338,18 @@ def test_the_correlation_id_is_carried_into_audit(client, engine, token, owner):
     client.post("/v1/approvals", json=body, headers=headers(token, correlation=correlation))
     [event] = events(engine, correlation_id=correlation)
     assert event["action"] == "approval.create"
+
+
+def test_a_failed_refusal_audit_still_returns_401(client, monkeypatch):
+    from sqlalchemy.exc import OperationalError
+
+    from app import api
+
+    def broken(*args, **kwargs):
+        raise OperationalError("insert", {}, Exception("database down"))
+
+    monkeypatch.setattr(api.audit, "record", broken)
+    response = client.get(
+        "/v1/approvals", params={"principal_id": "user-1"}, headers=headers("glsvc_wrong")
+    )
+    assert response.status_code == 401

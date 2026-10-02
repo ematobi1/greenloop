@@ -48,6 +48,8 @@ Assert-True ($common -match "foreach \(\`$name in \`$PassEnv\) \{ '-e'; \`$name 
 $bootstrapText = Get-Content -Raw $bootstrap
 Assert-True ($bootstrapText.IndexOf("SET log_statement = 'none'") -lt $bootstrapText.IndexOf('set_config(')) 'logging must be off before set_config carries a password'
 Assert-True ($bootstrapText -match '\\o /dev/null') 'set_config output must be hidden'
+Assert-True ($bootstrapText -match 'SHOW_CONTEXT never') 'psql must not print error context, which holds the role statement'
+Assert-True ($bootstrapText.IndexOf('SHOW_CONTEXT never') -lt $bootstrapText.IndexOf("'BEGIN;'")) 'error context must be off before any statement runs'
 
 $leftovers = docker ps -a --filter 'label=greenloop.purpose=test-db' -q 2>$null
 Assert-True (-not $leftovers) 'dry runs must not start containers'
