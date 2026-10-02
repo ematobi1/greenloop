@@ -3,6 +3,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agents.registry import build_agent_registry
 from app.ai.providers.registry import build_registry
 from app.api.v1 import health
 from app.api.v1.router import router as v1_router
@@ -30,6 +31,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         make_session_factory(make_engine(settings)) if settings.database_url else None
     )
     app.state.provider_registry = build_registry(settings)
+    app.state.agent_registry = build_agent_registry()
     register_error_handlers(app)
     install_request_middleware(app, settings.allowed_hosts)
     app.add_middleware(
