@@ -122,6 +122,9 @@ class TestTimestamps:
         assert _timestamp_fields() == {
             "Agent": {"created_at", "updated_at"},
             "Approval": {"decided_at", "consumed_at", "expires_at", "created_at", "updated_at"},
+            "ApprovalActor": set(),
+            "ApprovalCreateRequest": set(),
+            "ApprovalDecisionRequest": set(),
             "AuditRecord": {"occurred_at"},
             "Dispatch": {"dispatched_at"},
             "ErrorReport": {"occurred_at"},
@@ -177,6 +180,9 @@ class TestSchemaExport:
         assert versions == {
             "Agent": "3",
             "Approval": "1",
+            "ApprovalActor": "1",
+            "ApprovalCreateRequest": "1",
+            "ApprovalDecisionRequest": "1",
             "Task": "2",
             "Dispatch": "2",
             "ToolPermission": "2",

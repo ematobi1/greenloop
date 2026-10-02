@@ -42,13 +42,15 @@ npm --prefix apps/web ci
 
 Then open http://localhost:8000/health (expects `{"status":"ok"}`) and http://localhost:8000/docs.
 
-If ports 5432, 8000, 8100 or 3000 are taken, set `GREENLOOP_DB_PORT`, `GREENLOOP_ORCHESTRATOR_PORT`, `GREENLOOP_BROKER_PORT` or `GREENLOOP_WEB_PORT` in `.env` before `docker compose up`.
+If ports 5432, 8000 or 3000 are taken, set `GREENLOOP_DB_PORT`, `GREENLOOP_ORCHESTRATOR_PORT` or `GREENLOOP_WEB_PORT` in `.env` before `docker compose up`. The broker has no host port: only the orchestrator reaches it, on the compose network.
+
+Each service connects as its own Postgres role. Before the first `docker compose up` of the services, set up the roles, migrations and the broker service token as described in [docs/database-roles.md](docs/database-roles.md).
 
 Each service keeps its own `app/` package and runs from its own folder, so run pytest and uvicorn from `services/<name>` (the scripts do this for you).
 
 The orchestrator reads the repo-root `.env` from any working directory, so uvicorn, `python -m alembic` and `python -m app.cli` all work from `services/orchestrator`. Real environment variables override `.env`. Set `GREENLOOP_ENV_FILE` to load a different file (Docker, CI).
 
-`scripts\test-postgres.ps1` runs the Postgres tests in a uniquely named throwaway container on `GREENLOOP_TEST_DB_PORT` (default 55433), separate from the dev database on `GREENLOOP_DB_PORT`, so both can run at once. It always removes its container, and cleans up any left by a killed run. Pass `-Path tests` for the whole orchestrator suite.
+`scripts\test-postgres.ps1` runs the Postgres tests in a uniquely named throwaway container on `GREENLOOP_TEST_DB_PORT` (default 55433), separate from the dev database on `GREENLOOP_DB_PORT`, so both can run at once. It always removes its container, and cleans up any left by a killed run. It runs both services' integration suites by default; pass `-Service orchestrator -Path tests` for the whole orchestrator suite, or `-Service broker` for the broker only.
 
 ## Rules
 

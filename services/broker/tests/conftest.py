@@ -1,8 +1,17 @@
+import os
+import tempfile
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
 from greenloop_contracts import ToolPermission
+
+# Tests never read the developer's .env: settings load from an empty file instead.
+_EMPTY_ENV = Path(tempfile.mkdtemp(prefix="broker-tests-")) / "empty.env"
+_EMPTY_ENV.touch()
+os.environ["GREENLOOP_ENV_FILE"] = str(_EMPTY_ENV)
+os.environ.pop("BROKER_DATABASE_URL", None)
 
 
 @pytest.fixture

@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-Runs the orchestrator's Postgres tests against a throwaway pgvector container.
+Runs the orchestrator's and broker's Postgres tests against a throwaway pgvector container.
 
 .DESCRIPTION
 Starts a uniquely named pgvector/pgvector:pg16 container with a random password
@@ -13,13 +13,16 @@ on GREENLOOP_DB_PORT, default 5432).
 The port comes from -Port, else GREENLOOP_TEST_DB_PORT, else 55433.
 
 .EXAMPLE
-.\scripts\test-postgres.ps1                     # tests/integration
-.\scripts\test-postgres.ps1 -Path tests         # the whole orchestrator suite
+.\scripts\test-postgres.ps1                     # tests/integration of both services
+.\scripts\test-postgres.ps1 -Service broker     # broker only
+.\scripts\test-postgres.ps1 -Service orchestrator -Path tests   # the whole orchestrator suite
 .\scripts\test-postgres.ps1 -DryRun             # print the plan, start nothing
 #>
 param(
     [int]$Port = 0,
     [string]$Path = 'tests/integration',
+    [ValidateSet('all', 'orchestrator', 'broker')]
+    [string]$Service = 'all',
     [switch]$DryRun
 )
 
@@ -56,6 +59,34 @@ function Remove-StaleTestDbs {
     }
 }
 
+# Runs the real db-bootstrap.ps1 and db-transfer-ownership.ps1 against the throwaway
+# container with synthetic passwords, and checks that no password reaches the output.
+function Test-DbScripts([string]$Container) {
+    $passwords = @{
+        ORCHESTRATOR_DB_PASSWORD = 'synthetic-' + [guid]::NewGuid().ToString('N')
+        BROKER_DB_PASSWORD = 'synthetic-' + [guid]::NewGuid().ToString('N')
+    }
+    $saved = @{}
+    foreach ($key in $passwords.Keys) { $saved[$key] = [Environment]::GetEnvironmentVariable($key) }
+    try {
+        foreach ($key in $passwords.Keys) { [Environment]::SetEnvironmentVariable($key, $passwords[$key], 'Process') }
+        $output = & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'db-bootstrap.ps1') -Container $Container 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "db-bootstrap.ps1 failed:`n$output" }
+        $output += & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'db-transfer-ownership.ps1') -Container $Container -Yes 2>&1 | Out-String
+        if ($LASTEXITCODE -ne 0) { throw "db-transfer-ownership.ps1 failed:`n$output" }
+        foreach ($value in $passwords.Values) {
+            if ($output.Contains($value)) { throw 'A role password appeared in the db script output.' }
+        }
+        $logs = docker logs $Container 2>&1 | Out-String
+        foreach ($value in $passwords.Values) {
+            if ($logs.Contains($value)) { throw 'A role password appeared in the Postgres server log.' }
+        }
+        Write-Host 'db-bootstrap.ps1 and db-transfer-ownership.ps1 ran cleanly; no password in output or server log.'
+    } finally {
+        foreach ($key in $passwords.Keys) { [Environment]::SetEnvironmentVariable($key, $saved[$key], 'Process') }
+    }
+}
+
 function Resolve-TestDbPort([int]$Requested) {
     if ($Requested -gt 0) { return $Requested }
     if ($env:GREENLOOP_TEST_DB_PORT) { return [int]$env:GREENLOOP_TEST_DB_PORT }
@@ -66,7 +97,7 @@ $Port = Resolve-TestDbPort $Port
 $name = 'greenloop-test-db-' + [guid]::NewGuid().ToString('N').Substring(0, 12)
 
 if ($DryRun) {
-    Write-Host "container=$name port=$Port path=$Path"
+    Write-Host "container=$name port=$Port path=$Path service=$Service"
     exit 0
 }
 
@@ -81,7 +112,7 @@ try {
     $started = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
     docker run -d --rm --name $name --label $label --label "greenloop.started=$started" --label "greenloop.owner-pid=$PID" `
         -e POSTGRES_USER=greenloop_test -e "POSTGRES_PASSWORD=$password" -e POSTGRES_DB=greenloop_test `
-        -p "127.0.0.1:${Port}:5432" $image | Out-Null
+        -p "127.0.0.1:${Port}:5432" $image postgres -c log_statement=all | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "Could not start $name on port $Port (is Docker running, or is the port taken?)" }
 
     # -h 127.0.0.1 waits for the final server; the init-time server listens on the socket only.
@@ -93,14 +124,20 @@ try {
     } until ($ready -or (Get-Date) -gt $deadline)
     if (-not $ready) { throw "$name did not become ready within 90s" }
 
+    Test-DbScripts $name
+
     $env:TEST_DATABASE_URL = "postgresql+psycopg://greenloop_test:$password@127.0.0.1:$Port/greenloop_test"
-    Write-Host "Postgres tests on $name (127.0.0.1:$Port): $Path"
-    Push-Location (Join-Path $root 'services\orchestrator')
-    try {
-        & $python -m pytest -q $Path
-        $exitCode = $LASTEXITCODE
-    } finally {
-        Pop-Location
+    $suites = if ($Service -eq 'all') { 'orchestrator', 'broker' } else { @($Service) }
+    $exitCode = 0
+    foreach ($suite in $suites) {
+        Write-Host "Postgres tests on $name (127.0.0.1:$Port): services/$suite $Path"
+        Push-Location (Join-Path $root "services\$suite")
+        try {
+            & $python -m pytest -q $Path
+            if ($LASTEXITCODE -ne 0) { $exitCode = $LASTEXITCODE }
+        } finally {
+            Pop-Location
+        }
     }
 } finally {
     $env:TEST_DATABASE_URL = $previousUrl

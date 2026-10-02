@@ -34,6 +34,7 @@ from app.agents.registry import AgentRegistry, UnknownAgentError
 from app.audit import recorder
 from app.core.auth import Principal
 from app.memory.execution import ExecutionMemoryStatus, record_execution
+from app.orchestration.dispatch_context import dispatch_scope
 from greenloop_contracts import (
     AgentStatus,
     AuditOutcome,
@@ -117,8 +118,9 @@ async def _run(agent: BaseAgent, item: Dispatch) -> ExecutionResult:
     started_at = datetime.now(UTC)
     deadline = asyncio.timeout((item.timeout_ms or DEFAULT_TIMEOUT_MS) / 1000)
     try:
-        async with deadline:
-            result = await agent.run(item)
+        with dispatch_scope():
+            async with deadline:
+                result = await agent.run(item)
     except TimeoutError as err:
         if deadline.expired():
             return _failed(item, started_at, "AGENT_TIMEOUT", "The agent did not finish in time.")
