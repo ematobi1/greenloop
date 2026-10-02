@@ -35,6 +35,7 @@ class Settings(BaseSettings):
 
     database_url: SecretStr | None = None
     broker_url: str | None = None
+    broker_service_token: SecretStr | None = None
 
     anthropic_api_key: SecretStr | None = None
     chat_model: str = Field(

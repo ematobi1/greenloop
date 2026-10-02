@@ -13,6 +13,7 @@ from app.memory import execution
 from app.memory.execution import ExecutionMemoryStatus
 from app.memory.store import MemoryStore
 from app.orchestration import dispatcher
+from app.orchestration.dispatch_context import in_dispatch
 from greenloop_contracts import Dispatch, ExecutionStatus
 
 
@@ -64,6 +65,24 @@ def test_a_result_for_another_dispatch_is_refused(item):
     result = asyncio.run(dispatcher._run(_WrongDispatchAgent(), item))
     assert result.error.code == "AGENT_INVALID_RESULT"
     assert result.dispatch_id == item.dispatch_id
+
+
+class _FlagRecordingAgent(EchoReferenceAgent):
+    seen: list[bool]
+
+    async def run(self, item):
+        self.seen.append(in_dispatch())
+        return await super().run(item)
+
+
+def test_agents_run_inside_the_dispatch_scope_and_it_ends_after(item):
+    agent = _FlagRecordingAgent()
+    agent.seen = []
+    for _ in (1, 2):
+        asyncio.run(dispatcher._run(agent, item))
+    asyncio.run(dispatcher._run(_CrashingAgent(), item))
+    assert agent.seen == [True, True]
+    assert not in_dispatch()
 
 
 def test_recording_the_same_dispatch_twice_is_already_recorded(item, session_factory):
