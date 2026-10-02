@@ -7,6 +7,12 @@ from greenloop_contracts.approval import (
     Approval,
     ApprovalStatus,
 )
+from greenloop_contracts.approval_request import (
+    ActorKind,
+    ApprovalActor,
+    ApprovalCreateRequest,
+    ApprovalDecisionRequest,
+)
 from greenloop_contracts.audit_record import AuditOutcome, AuditRecord
 from greenloop_contracts.base import ContractModel
 from greenloop_contracts.dispatch import MAX_TIMEOUT_MS, Dispatch
@@ -46,10 +52,14 @@ __all__ = [
     "DENIAL_CODES",
     "MAX_APPROVAL_TTL",
     "MAX_TIMEOUT_MS",
+    "ActorKind",
     "Agent",
     "AgentDomain",
     "AgentStatus",
     "Approval",
+    "ApprovalActor",
+    "ApprovalCreateRequest",
+    "ApprovalDecisionRequest",
     "ApprovalStatus",
     "AuditOutcome",
     "AuditRecord",

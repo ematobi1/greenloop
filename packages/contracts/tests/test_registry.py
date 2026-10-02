@@ -17,6 +17,9 @@ EXPECTED = {
     "ToolPermission",
     "ToolGrant",
     "Approval",
+    "ApprovalActor",
+    "ApprovalCreateRequest",
+    "ApprovalDecisionRequest",
     "MemoryRecord",
     "Event",
     "ExecutionResult",
@@ -25,7 +28,7 @@ EXPECTED = {
 }
 
 
-def test_registry_holds_exactly_the_eleven_contracts():
+def test_registry_holds_exactly_the_fourteen_contracts():
     assert set(CONTRACTS) == EXPECTED
 
 
