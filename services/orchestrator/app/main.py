@@ -13,6 +13,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import install_request_middleware
 from app.core.redaction import Redactor
 from app.db.session import make_engine, make_session_factory
+from app.tools.broker_client import BrokerClient
 
 ERROR_RESPONSES = {
     status: {"model": ErrorEnvelope}
@@ -32,13 +33,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     )
     app.state.provider_registry = build_registry(settings)
     app.state.agent_registry = build_agent_registry()
+    app.state.broker_client = (
+        BrokerClient(settings.broker_url, settings.broker_service_token.get_secret_value())
+        if settings.broker_url and settings.broker_service_token
+        else None
+    )
     register_error_handlers(app)
     install_request_middleware(app, settings.allowed_hosts)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.cors_origins,
         allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Authorization", "Content-Type"],
+        allow_headers=["Authorization", "Content-Type", "Idempotency-Key"],
         expose_headers=["X-Request-ID", "X-Execution-Memory", "X-Audit-Persistence"],
     )
     app.include_router(health.router)
