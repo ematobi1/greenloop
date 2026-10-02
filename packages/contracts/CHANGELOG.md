@@ -1,5 +1,15 @@
 # Changelog: greenloop-contracts
 
+## 0.4.0 (2026-10-02)
+
+The request bodies of the broker's approvals API (ADR 0009, PR5b-2). Additive; nothing existing changes.
+
+### Added
+
+- **ApprovalActor** (schema v1): who is asking, as the orchestrator's authenticated Principal sees it: `principal_id`, `kind` (user or system) and `in_dispatch` (strict boolean). `kind` and `in_dispatch` have no defaults. `may_decide` is true only for a user outside a dispatch (rule 6).
+- **ApprovalCreateRequest** (schema v1): the `operation` (a `ToolPermission`) and the `actor`, who must be the principal the operation belongs to. There is no field for an approval id, status or summary: the broker derives them (rules 7 and 8).
+- **ApprovalDecisionRequest** (schema v1): `approved` (strict boolean) and the `actor`. The approval id is in the URL.
+
 ## 0.3.0 (2026-10-02)
 
 Adds what PR5b needs: approvals owned by the broker (ADR 0009) and a way for an agent to declare model access.

@@ -1,5 +1,7 @@
+import pytest
 from fastapi.testclient import TestClient
 
+from app.config import BrokerSettings
 from app.main import create_app
 
 
@@ -21,3 +23,32 @@ def test_tool_calls_not_implemented_yet():
     response = TestClient(create_app()).post("/v1/tool-calls")
     assert response.status_code == 501
     assert response.json()["error"]["code"] == "NOT_IMPLEMENTED"
+
+
+def test_approval_routes_are_unavailable_without_a_database():
+    client = TestClient(create_app(BrokerSettings(_env_file=None)))
+    response = client.get("/v1/approvals", params={"principal_id": "user-1"})
+    assert response.status_code == 503
+    assert response.json() == {
+        "error": {
+            "code": "DATABASE_UNAVAILABLE",
+            "message": "The broker database is not configured.",
+        }
+    }
+
+
+def test_there_is_no_consume_route():
+    client = TestClient(create_app(BrokerSettings(_env_file=None)))
+    paths = set(client.app.openapi()["paths"])
+    assert "/v1/approvals/{approval_id}/decisions" in paths
+    assert not any("consume" in path for path in paths)
+
+
+def test_a_malformed_database_url_never_reaches_the_error(monkeypatch):
+    url = "not a url with synthetic-pass inside"
+    monkeypatch.setenv("BROKER_DATABASE_URL", url)
+    with pytest.raises(RuntimeError) as raised:
+        create_app(BrokerSettings(_env_file=None))
+    assert "synthetic-pass" not in str(raised.value)
+    assert raised.value.__cause__ is None
+    assert raised.value.__suppress_context__

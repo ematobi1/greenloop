@@ -1,3 +1,5 @@
+import asyncio
+import inspect
 from collections.abc import Callable
 from datetime import UTC, datetime
 
@@ -12,6 +14,16 @@ from app.core.config import Settings
 from app.db.models import Base, PrincipalRole, PrincipalRow
 from app.main import create_app
 from greenloop_contracts import AuditOutcome, AuditRecord, MemoryRecord
+
+
+@pytest.hookimpl(tryfirst=True)
+def pytest_pyfunc_call(pyfuncitem: pytest.Function) -> bool | None:
+    """Runs `async def` tests with asyncio.run, without an async test plugin."""
+    if not inspect.iscoroutinefunction(pyfuncitem.obj):
+        return None
+    arguments = {name: pyfuncitem.funcargs[name] for name in pyfuncitem._fixtureinfo.argnames}
+    asyncio.run(pyfuncitem.obj(**arguments))
+    return True
 
 
 @pytest.fixture

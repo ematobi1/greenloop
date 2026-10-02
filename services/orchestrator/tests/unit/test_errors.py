@@ -36,13 +36,16 @@ BUILT_ROUTES = {
     ("GET", "/v1/agents"),
     ("GET", "/v1/agents/x-1"),
     ("POST", "/v1/dispatches"),
+    ("GET", "/v1/approvals"),
+    ("GET", "/v1/approvals/x-1"),
+    ("POST", "/v1/approvals/x-1/decisions"),
 }
 V1_ROUTES = _v1_routes()
 UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
 
 
 def test_every_v1_route_is_covered():
-    assert len(V1_ROUTES) == 21
+    assert len(V1_ROUTES) == 22
     assert set(V1_ROUTES) >= BUILT_ROUTES
 
 
