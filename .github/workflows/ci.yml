@@ -70,8 +70,14 @@ jobs:
         run: |
           pip install -e "packages/contracts[dev]"
           pip install -e "services/orchestrator[dev]"
-      - name: Integration tests
+          pip install -e "services/broker[dev]"
+      - name: Orchestrator integration tests
         working-directory: services/orchestrator
+        env:
+          TEST_DATABASE_URL: postgresql+psycopg://greenloop_test:test-only-password@127.0.0.1:5432/greenloop_test
+        run: python -m pytest -q tests/integration
+      - name: Broker integration tests
+        working-directory: services/broker
         env:
           TEST_DATABASE_URL: postgresql+psycopg://greenloop_test:test-only-password@127.0.0.1:5432/greenloop_test
         run: python -m pytest -q tests/integration
