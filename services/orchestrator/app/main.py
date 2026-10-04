@@ -1,5 +1,8 @@
 """FastAPI application factory. Run with `uvicorn app.main:app` from services/orchestrator."""
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +16,7 @@ from app.core.logging import configure_logging
 from app.core.middleware import install_request_middleware
 from app.core.redaction import Redactor
 from app.db.session import make_engine, make_session_factory
+from app.db.startup_check import verify_database
 from app.tools.broker_client import BrokerClient
 
 ERROR_RESPONSES = {
@@ -25,12 +29,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or get_settings()
     redactor = Redactor(known_secrets=settings.secret_values())
     configure_logging(settings.log_level, redactor)
-    app = FastAPI(title="GreenLoop Orchestrator", version=settings.version)
+    engine = make_engine(settings) if settings.database_url else None
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if engine is not None and engine.dialect.name == "postgresql":
+            verify_database(engine)
+        yield
+
+    app = FastAPI(title="GreenLoop Orchestrator", version=settings.version, lifespan=lifespan)
     app.state.settings = settings
     app.state.redactor = redactor
-    app.state.session_factory = (
-        make_session_factory(make_engine(settings)) if settings.database_url else None
-    )
+    app.state.session_factory = make_session_factory(engine) if engine is not None else None
     app.state.provider_registry = build_registry(settings)
     app.state.agent_registry = build_agent_registry()
     app.state.broker_client = (
