@@ -68,6 +68,46 @@ docker compose exec -T db sh -c 'pg_restore -U $POSTGRES_USER -d $POSTGRES_DB --
 
 A dump taken before PR5b-2 restores tables owned by the bootstrap superuser: run `db-transfer-ownership.ps1` again afterwards.
 
+## Troubleshooting
+
+At startup, each service checks its own schema and refuses to start if anything is wrong (`app/db/startup_check.py` in each service). It checks that every table, view and sequence is owned by the service's role and that migrations are at head. The broker also checks that both append-only triggers on `broker.audit_events` exist, call `broker.audit_events_append_only()` and are enabled. The error lists every problem, never the URL or a password. Read it with:
+
+```powershell
+docker compose logs orchestrator broker
+```
+
+### "is owned by greenloop, not greenloop_orchestrator" (or "permission denied for table alembic_version")
+
+Tables in `public` still belong to the bootstrap superuser. See who owns what:
+
+```powershell
+"select relname, relowner::regrole from pg_class where relnamespace = 'public'::regnamespace and relkind in ('r','p','v','m','S') order by 1;" | docker compose exec -T db sh -c 'psql -X -U $POSTGRES_USER -d $POSTGRES_DB'
+```
+
+Take a backup (step 1 of first-time setup), then run `.\scripts\db-transfer-ownership.ps1` and restart with `.\scripts\dev.ps1 -Service stack`.
+
+This happened once on the dev database (2026-10-04): the first transfer didn't take effect on the dev DB, and all 7 tables in `public` were still owned by `greenloop`. The exact cause is unknown. The startup check now catches this. Restoring a dump taken before PR5b-2 does the same thing (see [Restoring a backup](#restoring-a-backup)).
+
+For the broker, use the same query with `'broker'::regnamespace`. No script moves broker objects, because `greenloop_broker` creates them all through its own migrations. A foreign owner there means something was created by hand: find out what it is before you change its owner.
+
+### "Migrations are at …, not head …" or "Migrations have not run"
+
+The image is newer than the database. Run step 5 of first-time setup for that service, as its own role, then restart.
+
+### "Append-only trigger broker.audit_events.… is not enabled" or "is missing"
+
+Someone disabled, dropped or replaced a trigger that keeps the audit log append-only. Before you fix it, find out who did it and why, and treat audit rows written since then as unprotected. To re-enable a trigger: `ALTER TABLE broker.audit_events ENABLE TRIGGER <name>;`, run as `greenloop_broker` or the superuser. If the trigger is missing or calls another function, recreate it exactly as the broker's first migration does (`services/broker/app/db/migrations/versions/2026-10-02_approvals_audit_service_tokens.py`).
+
+### The containers run old code after `git pull`
+
+`docker compose up --force-recreate` recreates containers from the image that already exists. It never rebuilds. Rebuild and start the stack with:
+
+```powershell
+.\scripts\dev.ps1 -Service stack      # docker compose up -d --build --wait
+```
+
+`--wait` makes the command fail when a service exits at startup, for example on the startup check above.
+
 ## How the scripts keep secrets out of sight
 
 - Passwords reach the container through `docker exec -e NAME` (copied from the environment, never on a command line) and reach SQL through psql's `:'variable'` quoting, never through the SQL text.
