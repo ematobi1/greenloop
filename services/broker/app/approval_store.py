@@ -39,6 +39,8 @@ from greenloop_contracts import (
 )
 
 SUMMARY_MAX_CHARS = 500
+SUMMARY_PART_MAX_CHARS = 40
+SHORTENED_NOTE = " [shortened: review the full operation before approving]"
 LIST_LIMIT_MAX = 100
 
 
@@ -60,15 +62,40 @@ class ApprovalRefusedError(Exception):
 
 
 def summarize(permission: ToolPermission) -> str:
-    """What the operation does, built only from the operation. Non-ASCII characters
-    are escaped (\\uXXXX) so lookalike text is visible."""
-    arguments = json.dumps(
-        permission.arguments, sort_keys=True, ensure_ascii=True, separators=(", ", ": ")
-    )
-    text = f"{permission.consequence.value}: {permission.tool}.{permission.operation} {arguments}"
-    if len(text) > SUMMARY_MAX_CHARS:
-        text = text[: SUMMARY_MAX_CHARS - 3] + "..."
-    return text
+    """What the operation does, built only from the operation (rule 8). Non-ASCII
+    characters are escaped as JSON unicode escapes so lookalike text is visible.
+
+    A summary that would pass SUMMARY_MAX_CHARS is never cut blindly, which could hide
+    a recipient behind a long padding argument: every key is kept, each key and value
+    is capped, keys that still don't fit are counted, and SHORTENED_NOTE says so.
+    """
+    head = f"{permission.consequence.value}: {permission.tool}.{permission.operation}"
+    full = f"{head} {_ascii_json(permission.arguments)}"
+    if len(full) <= SUMMARY_MAX_CHARS:
+        return full
+    parts = [
+        f"{_capped(_ascii_json(key))}: {_capped(_ascii_json(value))}"
+        for key, value in sorted(permission.arguments.items())
+    ]
+    budget = SUMMARY_MAX_CHARS - len(head) - len(SHORTENED_NOTE) - len(" {, +999 more}")
+    shown: list[str] = []
+    for part in parts:
+        if sum(len(item) + 2 for item in shown) + len(part) > budget:
+            break
+        shown.append(part)
+    hidden = len(parts) - len(shown)
+    body = ", ".join(shown) + (f", +{hidden} more" if hidden else "")
+    return f"{head} {{{body}}}{SHORTENED_NOTE}"
+
+
+def _ascii_json(value: object) -> str:
+    return json.dumps(value, sort_keys=True, ensure_ascii=True, separators=(", ", ": "))
+
+
+def _capped(text: str) -> str:
+    if len(text) <= SUMMARY_PART_MAX_CHARS:
+        return text
+    return text[: SUMMARY_PART_MAX_CHARS - 3] + "..."
 
 
 def _to_contract(row: RowMapping) -> Approval:

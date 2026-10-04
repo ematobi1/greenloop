@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import select, text
 from tests.integration.pg import TEST_DATABASE_URL
 
-from app.approval_store import ApprovalRefusal, ApprovalRefusedError, summarize
+from app.approval_store import SHORTENED_NOTE, ApprovalRefusal, ApprovalRefusedError, summarize
 from app.db.tables import approvals, audit_events
 from greenloop_contracts import ApprovalStatus, operation_hash
 
@@ -141,10 +141,39 @@ def test_the_summary_escapes_lookalike_characters(store, permission, owner):
     assert approval.summary.isascii()
 
 
-def test_the_summary_is_capped(store, permission, owner):
+def test_a_long_summary_is_marked_as_shortened(store, permission, owner):
     approval = create(store, permission(principal_id=owner, body="x" * 2000))
-    assert len(approval.summary) == 500
-    assert approval.summary.endswith("...")
+    assert len(approval.summary) <= 500
+    assert approval.summary.endswith(SHORTENED_NOTE)
+    assert approval.operation.arguments["body"] == "x" * 2000
+
+
+def test_padding_cannot_push_the_important_arguments_out_of_the_summary(permission, owner):
+    operation = permission(
+        principal_id=owner,
+        aaaa_note="pad " * 400,
+        amount=950,
+        to="attacker@example.com",
+    )
+    summary = summarize(operation)
+    assert len(summary) <= 500
+    assert '"amount": 950' in summary
+    assert '"to": "attacker@example.com"' in summary
+    assert summary.endswith(SHORTENED_NOTE)
+
+
+def test_keys_that_do_not_fit_are_counted(permission, owner):
+    arguments = {f"key{n:03}": "v" * 30 for n in range(40)}
+    summary = summarize(permission(principal_id=owner, **arguments))
+    assert len(summary) <= 500
+    assert "more}" in summary
+    shown = summary.count('"key')
+    assert f"+{40 - shown} more" in summary
+
+
+def test_a_short_summary_is_the_full_operation(permission, owner):
+    summary = summarize(permission(principal_id=owner, to="a@example.com"))
+    assert summary == 'write: github.create_issue {"to": "a@example.com"}'
 
 
 @pytest.mark.parametrize("value", [1e16, 1.0, 1, 0.1, -0.0, 12345678901234567890, "é"])
