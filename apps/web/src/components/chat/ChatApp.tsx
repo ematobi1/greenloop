@@ -158,7 +158,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     <div className="chat">
       <aside className="chat__sidebar" aria-label="Conversations">
         <button type="button" className="button" onClick={() => void newConversation()}>
-          New conversation
+          Start a conversation
         </button>
         <ul className="chat__conversations">
           {conversations.map((conversation) => (
