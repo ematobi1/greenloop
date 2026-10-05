@@ -36,6 +36,7 @@ npm --prefix apps/web ci
 .\scripts\test.ps1                 # run every suite
 .\scripts\lint.ps1                 # run every linter
 .\scripts\dev.ps1 -Service db      # Postgres + pgvector in Docker
+.\scripts\dev.ps1 -Service stack   # rebuild images and start the whole compose stack
 .\scripts\dev.ps1                  # start the orchestrator
 .\scripts\test-postgres.ps1        # Postgres tests in a throwaway container (port 55433)
 ```
