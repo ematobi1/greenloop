@@ -16,8 +16,10 @@ test("sections cover the seven planned areas in nav order", () => {
   );
 });
 
-test("every section has a page that renders its own slug", () => {
-  for (const { slug } of SECTIONS) {
+const BUILT = new Set(["chat"]);
+
+test("every unbuilt section has a placeholder page that renders its own slug", () => {
+  for (const { slug } of SECTIONS.filter(({ slug }) => !BUILT.has(slug))) {
     const page = join(appDir, slug, "page.tsx");
     assert.ok(existsSync(page), `missing ${page}`);
     assert.match(readFileSync(page, "utf8"), new RegExp(`slug="${slug}"`));
@@ -29,6 +31,10 @@ test("every section names a roadmap phase between 2 and 5", () => {
     assert.ok(Number.isInteger(section.phase) && section.phase >= 2 && section.phase <= 5);
     assert.ok(section.title.length > 0 && section.summary.length > 0);
   }
+});
+
+test("the chat page renders the chat app", () => {
+  assert.match(readFileSync(join(appDir, "chat", "page.tsx"), "utf8"), /<ChatApp /);
 });
 
 test("sectionBySlug rejects unknown slugs", () => {
