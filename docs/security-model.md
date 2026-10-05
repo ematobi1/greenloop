@@ -6,7 +6,8 @@ GreenLoop acts on a person's behalf with their memory and their accounts. The de
 
 | Boundary | Trusted side | Untrusted side | Enforced by |
 |---|---|---|---|
-| Browser to orchestrator | Orchestrator | Every request | `core/auth.py` resolves the principal from a bearer token (only its SHA256 is stored; missing, unknown, revoked and disabled all return the same 401); request validation; error envelope hides internals |
+| Browser to web server | Web server (`apps/web/src/server`) | Every `/api` request | The API token lives only in an httpOnly, Secure, SameSite=Strict `__Host-` cookie (12 h); writes need `Origin` equal to `WEB_ORIGIN` and a JSON body; only four orchestrator calls are exposed, with conversation ids checked; upstream errors relayed as code and message only; server text rendered as escaped text; frame-ancestors none, nosniff, no-referrer ([ADR 0010](adr/0010-web-proxies-with-cookie-session.md)) |
+| Web server to orchestrator | Orchestrator | Every request | `core/auth.py` resolves the principal from a bearer token (only its SHA256 is stored; missing, unknown, revoked and disabled all return the same 401); request validation; error envelope hides internals |
 | Memory to prompt | System prompt and current user message | All retrieved memory | `memory/context_builder.py`: principal filter, sanitize, redact, bound, escape |
 | History to prompt | System prompt and current user message | Earlier conversation turns, including replies that may quote poisoned memory | `ai/context.py` and `conversations/store.py`: owner's conversation only, answered turns only (refused, failed and cut-off turns are dropped), every message redacted, newest turns kept within the token budget. Assistant history is not re-framed as untrusted yet; tracked for when chat gets tools |
 | Model to tools | Permission model and broker | Every model-proposed tool call | `permissions/policy.py`, then the broker's own policy |
