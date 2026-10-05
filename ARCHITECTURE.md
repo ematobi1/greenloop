@@ -74,7 +74,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 ## Request flow
 
 1. **User** sends text, voice or a UI action to `apps/web`.
-2. **Web app** calls the orchestrator API (`api/v1`).
+2. **Web app** server routes (`apps/web/src/server`) call the orchestrator API (`api/v1`) over the compose network with the token from the user's httpOnly session cookie; the browser never calls the orchestrator directly ([ADR 0010](docs/adr/0010-web-proxies-with-cookie-session.md)).
 3. **Auth** (`core/auth.py`) resolves the principal. Every later step is scoped to that principal.
 4. **Reasoning** (`orchestration/reasoning.py`) interprets the request.
 5. **Planning** (`orchestration/planner.py`) drafts a plan of steps as `Task` contracts.
