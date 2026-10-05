@@ -35,6 +35,7 @@ ALLOWED = {
         "AI_MEMORY_RECORD_LIMIT",
     },
     "broker": {"BROKER_DATABASE_URL", "APPROVAL_TTL_SECONDS"},
+    "web": {"ORCHESTRATOR_URL", "WEB_ORIGIN"},
 }
 ROLE_URLS = {
     "orchestrator": ("DATABASE_URL", "greenloop_orchestrator", "ORCHESTRATOR_DB_PASSWORD"),
@@ -54,11 +55,13 @@ def check(services: dict) -> list[str]:
         environment = service.get("environment") or {}
         for variable in sorted(set(environment) - allowed):
             failures.append(f"{name} must not get {variable}")
-        url_name, role, own_password = ROLE_URLS[name]
-        url = str(environment.get(url_name, ""))
-        user = re.match(r"^[a-z+]+://([^:@/]+)[:@]", url)
-        if user is None or user.group(1) != role:
-            failures.append(f"{name} must connect as {role}")
+        own_password = None
+        if name in ROLE_URLS:
+            url_name, role, own_password = ROLE_URLS[name]
+            url = str(environment.get(url_name, ""))
+            user = re.match(r"^[a-z+]+://([^:@/]+)[:@]", url)
+            if user is None or user.group(1) != role:
+                failures.append(f"{name} must connect as {role}")
         for value in map(str, environment.values()):
             for secret in FOREIGN_SECRETS:
                 if secret != own_password and f"${{{secret}" in value:

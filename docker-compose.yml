@@ -39,7 +39,9 @@ services:
       DATABASE_URL: postgresql+psycopg://greenloop_orchestrator:${ORCHESTRATOR_DB_PASSWORD:-}@db:5432/${POSTGRES_DB:-greenloop}
       BROKER_URL: http://broker:8100
       ALLOWED_HOSTS: '["127.0.0.1","localhost","orchestrator"]'
-      CORS_ORIGINS: '["http://127.0.0.1:${GREENLOOP_WEB_PORT:-3000}","http://localhost:${GREENLOOP_WEB_PORT:-3000}"]'
+      # Empty: browsers never call the orchestrator. The web server proxies every call
+      # over this network and holds the token in an httpOnly cookie (ADR 0010).
+      CORS_ORIGINS: '[]'
       BROKER_SERVICE_TOKEN: ${BROKER_SERVICE_TOKEN:-}
       ENVIRONMENT: ${ENVIRONMENT:-}
       LOG_LEVEL: ${LOG_LEVEL:-}
@@ -94,6 +96,9 @@ services:
       context: apps/web
     environment:
       ORCHESTRATOR_URL: http://orchestrator:8000
+      # The exact origin the browser uses; state-changing requests from any other
+      # Origin are refused. Set WEB_ORIGIN in .env if you browse to localhost instead.
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://127.0.0.1:${GREENLOOP_WEB_PORT:-3000}}
     ports:
       - "127.0.0.1:${GREENLOOP_WEB_PORT:-3000}:3000"
     depends_on:
