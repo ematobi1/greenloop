@@ -6,6 +6,8 @@ Request order for a tool call (phase 3): policy, approval consume if required,
 ledger append, MCP forward, ledger append of the result.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
@@ -18,6 +20,7 @@ from app.api import ApiError, error_response, router
 from app.approval_store import ApprovalStore
 from app.config import BrokerSettings, get_settings
 from app.db.session import make_engine
+from app.db.startup_check import verify_database
 from app.policy import load_policy
 
 POLICY_DIR = Path(__file__).resolve().parent.parent / "policies"
@@ -54,7 +57,13 @@ def create_app(
             # The original message can quote the URL, password included.
             raise RuntimeError("BROKER_DATABASE_URL is not a valid database URL.") from None
 
-    app = FastAPI(title="GreenLoop Broker", version="0.1.0")
+    @asynccontextmanager
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        if engine is not None and engine.dialect.name == "postgresql":
+            verify_database(engine)
+        yield
+
+    app = FastAPI(title="GreenLoop Broker", version="0.1.0", lifespan=lifespan)
     app.state.policy = load_policy(policy_dir)
     app.state.engine = engine
     app.state.approval_store = (
