@@ -27,6 +27,7 @@ from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError
 from app.db.session import get_session
 from app.memory import provenance
+from app.memory.indexing import index_record
 from app.memory.store import (
     MemoryConflictError,
     MemoryNotFoundError,
@@ -144,7 +145,11 @@ def list_memory_records(
 
 @router.post("", status_code=201)
 def create_memory_record(
-    body: MemoryRecordCreate, principal: CurrentPrincipal, store: Store, session: DbSession
+    body: MemoryRecordCreate,
+    principal: CurrentPrincipal,
+    store: Store,
+    session: DbSession,
+    request: Request,
 ) -> MemoryRecord:
     try:
         record = MemoryRecord(
@@ -175,6 +180,7 @@ def create_memory_record(
             "Shared memory is not available yet. Use scope 'private'.",
             fields={"scope": "Shared scope is disabled until a sharing policy exists."},
         ) from None
+    index_record(session, request.app.state.embedder, record)
     session.commit()
     return record
 
@@ -208,6 +214,7 @@ def create_memory_revision(
     principal: CurrentPrincipal,
     store: Store,
     session: DbSession,
+    request: Request,
 ) -> MemoryRecord:
     if body.confidence == "verified" and not principal.is_system:
         raise ApiError(
@@ -243,6 +250,7 @@ def create_memory_revision(
         raise _conflict() from None
     except ValidationError as err:
         raise _invalid(err) from None
+    index_record(session, request.app.state.embedder, revision)
     session.commit()
     return revision
 

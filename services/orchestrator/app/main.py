@@ -17,6 +17,7 @@ from app.core.middleware import install_request_middleware
 from app.core.redaction import Redactor
 from app.db.session import make_engine, make_session_factory
 from app.db.startup_check import verify_database
+from app.memory.embeddings import build_embedder
 from app.tools.broker_client import BrokerClient
 
 ERROR_RESPONSES = {
@@ -42,6 +43,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redactor = redactor
     app.state.session_factory = make_session_factory(engine) if engine is not None else None
     app.state.provider_registry = build_registry(settings)
+    app.state.embedder = build_embedder(settings)
     app.state.agent_registry = build_agent_registry()
     app.state.broker_client = (
         BrokerClient(settings.broker_url, settings.broker_service_token.get_secret_value())

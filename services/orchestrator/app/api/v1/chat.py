@@ -114,7 +114,11 @@ def _engine(request: Request) -> ChatEngine:
     if state.session_factory is None:
         raise ApiError(503, "DATABASE_UNAVAILABLE", "The database is not configured.")
     return ChatEngine(
-        state.session_factory, state.provider_registry, state.redactor, state.settings
+        state.session_factory,
+        state.provider_registry,
+        state.redactor,
+        state.settings,
+        embedder=state.embedder,
     )
 
 
@@ -198,6 +202,7 @@ async def send_message(
             "Request validation failed.",
             fields={"content": f"At most {settings.ai_max_message_chars} characters."},
         )
+    query_vector = await engine.embed_query(body.content)
     try:
         turn = await asyncio.to_thread(
             engine.prepare,
@@ -206,6 +211,7 @@ async def send_message(
             body.content,
             request.state.correlation_id,
             body.provider,
+            query_vector,
         )
     except ConversationNotFoundError:
         raise _not_found() from None

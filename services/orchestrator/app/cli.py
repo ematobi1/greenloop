@@ -9,6 +9,7 @@ issue-token prints the token once on stdout. Only its SHA256 is stored.
 """
 
 import argparse
+import asyncio
 import sys
 from collections.abc import Callable, Sequence
 
@@ -20,6 +21,8 @@ from app.core import tokens
 from app.core.config import get_settings
 from app.db.models import PrincipalRole
 from app.db.session import make_engine, make_session_factory
+from app.memory import indexing
+from app.memory.embeddings import Embedder, build_embedder
 from greenloop_contracts.base import Identifier
 
 _identifier = TypeAdapter(Identifier)
@@ -58,11 +61,20 @@ def _parser() -> argparse.ArgumentParser:
     issue.add_argument("--label", type=_text_arg(100), default="default")
     revoke = commands.add_parser("revoke-token")
     revoke.add_argument("token_id", type=_identifier_arg)
+    commands.add_parser(
+        "embed-memory", help="Add embeddings to live memory records that have none (ADR 0011)."
+    )
     return parser
 
 
-def run(argv: Sequence[str], session_factory: Callable[[], Session]) -> int:
+def run(
+    argv: Sequence[str],
+    session_factory: Callable[[], Session],
+    embedder: Embedder | None = None,
+) -> int:
     args = _parser().parse_args(argv)
+    if args.command == "embed-memory":
+        return _embed_memory(session_factory, embedder)
     with session_factory() as session:
         try:
             if args.command == "create-principal":
@@ -88,8 +100,25 @@ def run(argv: Sequence[str], session_factory: Callable[[], Session]) -> int:
     return 0
 
 
+def _embed_memory(session_factory: Callable[[], Session], embedder: Embedder | None) -> int:
+    if embedder is None:
+        print("Error: set EMBEDDING_PROVIDER first (see ADR 0011).", file=sys.stderr)
+        return 1
+    with session_factory() as session:
+        added = asyncio.run(indexing.backfill(session, embedder))
+        left = len(indexing.unembedded_live_records(session, embedder.model, 1))
+    print(f"Embedded {added} memory records with {embedder.model}.")
+    if left:
+        print(
+            "Error: some records are still missing embeddings; is the embedder up?", file=sys.stderr
+        )
+        return 1
+    return 0
+
+
 def main() -> int:
-    return run(sys.argv[1:], make_session_factory(make_engine(get_settings())))
+    settings = get_settings()
+    return run(sys.argv[1:], make_session_factory(make_engine(settings)), build_embedder(settings))
 
 
 if __name__ == "__main__":
