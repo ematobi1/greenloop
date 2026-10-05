@@ -3,7 +3,7 @@
 -- migrations and the bootstrap superuser is no longer needed at runtime.
 -- Run as a superuser after bootstrap-roles.sql, in one transaction. Idempotent.
 --
--- Extension members are left alone. Sequences and indexes owned by a table move
+-- Extension members, and array types of extension types, are left alone. Sequences and indexes owned by a table move
 -- with the table. A multirange does not follow its range type, so both move.
 -- The last block refuses to commit if anything is left behind.
 
@@ -91,9 +91,11 @@ BEGIN
         SELECT t.oid::regtype::text
         FROM pg_type t
         WHERE t.typnamespace = 'public'::regnamespace AND t.typowner <> orchestrator
+          -- 'i': array and row types follow their element type or table, including
+          -- the array types of extension types such as vector[].
           AND NOT EXISTS (
               SELECT FROM pg_depend d
-              WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype = 'e'
+              WHERE d.classid = 'pg_type'::regclass AND d.objid = t.oid AND d.deptype IN ('e', 'i')
           )
     ) AS remaining;
     IF leftovers IS NOT NULL THEN

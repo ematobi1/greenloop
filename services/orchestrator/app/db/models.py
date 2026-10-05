@@ -6,12 +6,16 @@ append-only: database triggers reject UPDATE, DELETE and TRUNCATE (see migration
 Conversations are soft-deleted (deleted_at) and carry a turn lease (active_turn_id,
 turn_lease_expires_at) so one chat turn runs at a time; a trigger rejects UPDATE on messages.
 
+memory_embeddings holds one vector per (record, embedding model), kept apart from
+memory_records so adding or backfilling an embedding never updates a memory row.
+
 TODO(phase-4): jobs.
 """
 
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     CheckConstraint,
@@ -253,6 +257,29 @@ class MessageStatus(StrEnum):
 
     COMPLETE = "complete"
     INCOMPLETE = "incomplete"
+
+
+EMBEDDING_DIMENSIONS = 768
+
+
+class MemoryEmbeddingRow(TimestampMixin, Base):
+    __tablename__ = "memory_embeddings"
+    __table_args__ = (
+        Index(
+            "ix_memory_embeddings_cosine",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+    record_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("memory_records.record_id", name="fk_memory_embeddings_record"),
+        primary_key=True,
+    )
+    model: Mapped[str] = mapped_column(String(100), primary_key=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
 
 
 class ConversationRow(TimestampMixin, Base):
