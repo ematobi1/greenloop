@@ -3,10 +3,11 @@
 import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
+from sqlalchemy import create_engine
 
 from app import main
 from app.core.config import Settings
-from app.db.startup_check import DatabaseStartupError, error_message
+from app.db.startup_check import DatabaseStartupError, error_message, verify_database
 
 
 def _settings(database_url: str | None) -> Settings:
@@ -51,7 +52,7 @@ def test_a_failing_check_stops_startup(monkeypatch):
 
 
 def test_error_message_lists_problems_fixes_and_the_doc():
-    message = error_message("orchestrator", ["a is wrong.", "b is wrong."], ["Do c."])
+    message = error_message("orchestrator", ["a is wrong.", "b is wrong."], "Do c.")
     assert message.splitlines() == [
         "The orchestrator database is not ready:",
         "  - a is wrong.",
@@ -60,3 +61,17 @@ def test_error_message_lists_problems_fixes_and_the_doc():
         "  - Do c.",
         "See docs/database-roles.md, section Troubleshooting.",
     ]
+
+
+def test_an_unreachable_database_names_no_host_user_or_password():
+    engine = create_engine(
+        "postgresql+psycopg://synthetic-user:synthetic-pass@127.0.0.1:1/synthetic-db",
+        connect_args={"connect_timeout": 2},
+    )
+    with pytest.raises(DatabaseStartupError) as caught:
+        verify_database(engine)
+    message = str(caught.value)
+    assert message.startswith("The orchestrator database could not be checked (")
+    for detail in ("synthetic-user", "synthetic-pass", "127.0.0.1", "synthetic-db"):
+        assert detail not in message
+    assert caught.value.__suppress_context__

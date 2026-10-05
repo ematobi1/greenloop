@@ -5,7 +5,12 @@ import pytest
 from sqlalchemy import text
 from tests.integration.pg import TEST_DATABASE_URL
 
-from app.db.startup_check import APPEND_ONLY_TRIGGERS, DatabaseStartupError, verify_database
+from app.db.startup_check import (
+    APPEND_ONLY_TRIGGERS,
+    DatabaseStartupError,
+    schema_problems,
+    verify_database,
+)
 
 pytestmark = pytest.mark.skipif(
     not TEST_DATABASE_URL, reason="TEST_DATABASE_URL not set; Postgres integration skipped"
@@ -41,15 +46,26 @@ def test_a_table_owned_by_another_role_is_named(engine, db_roles):
     assert db_roles.broker_password not in message
 
 
-def test_a_schema_not_at_head_is_caught(engine, db_roles):
+def test_a_database_ahead_of_the_image_says_rebuild(engine, db_roles):
     head = _version(db_roles)
-    _admin(db_roles, "UPDATE broker.alembic_version SET version_num = 'zz_not_a_revision'")
+    _admin(db_roles, "UPDATE broker.alembic_version SET version_num = 'zz_from_a_newer_image'")
     try:
         with pytest.raises(DatabaseStartupError) as caught:
             verify_database(engine)
     finally:
         _admin(db_roles, "UPDATE broker.alembic_version SET version_num = :v", v=head)
-    assert f"Migrations are at zz_not_a_revision, not head {head}." in str(caught.value)
+    message = str(caught.value)
+    assert f"zz_from_a_newer_image, which this image doesn't know (its head is {head})" in message
+    assert "dev.ps1 -Service stack" in message
+    assert "alembic upgrade" not in message
+
+
+def test_a_missing_schema_is_reported_not_raised(engine):
+    with engine.connect() as connection:
+        assert schema_problems(connection, "zz_no_such_schema") == [
+            "Schema zz_no_such_schema does not exist."
+        ]
+        assert schema_problems(connection, "broker") == []
 
 
 def test_an_unmigrated_schema_is_caught(engine, db_roles):
@@ -71,6 +87,7 @@ def test_an_append_only_trigger_that_does_not_fire_is_caught(engine, db_roles, t
     finally:
         _admin(db_roles, f"ALTER TABLE broker.audit_events ENABLE TRIGGER {trigger}")
     assert f"broker.audit_events.{trigger} is not enabled." in str(caught.value)
+    assert "has been changed" not in str(caught.value)
     verify_database(engine)
 
 
@@ -109,4 +126,87 @@ def test_a_trigger_calling_another_function_counts_as_missing(engine, db_roles):
             " CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON broker.audit_events"
             " FOR EACH STATEMENT EXECUTE FUNCTION broker.audit_events_append_only()",
         )
+    verify_database(engine)
+
+
+RESTORE_TRUNCATE = (
+    "DROP TRIGGER IF EXISTS audit_events_no_truncate ON broker.audit_events;"
+    " CREATE TRIGGER audit_events_no_truncate BEFORE TRUNCATE ON broker.audit_events"
+    " FOR EACH STATEMENT EXECUTE FUNCTION broker.audit_events_append_only()"
+)
+RESTORE_UPDATE_DELETE = (
+    "DROP TRIGGER IF EXISTS audit_events_no_update_delete ON broker.audit_events;"
+    " CREATE TRIGGER audit_events_no_update_delete BEFORE UPDATE OR DELETE"
+    " ON broker.audit_events FOR EACH ROW EXECUTE FUNCTION broker.audit_events_append_only()"
+)
+
+
+T = "ON broker.audit_events"
+
+
+@pytest.mark.parametrize(
+    ("trigger", "clause", "restore"),
+    [
+        ("audit_events_no_update_delete", f"BEFORE INSERT {T} FOR EACH ROW", RESTORE_UPDATE_DELETE),
+        (
+            "audit_events_no_update_delete",
+            f"AFTER UPDATE OR DELETE {T} FOR EACH ROW",
+            RESTORE_UPDATE_DELETE,
+        ),
+        (
+            "audit_events_no_update_delete",
+            f"BEFORE UPDATE OR DELETE {T} FOR EACH STATEMENT",
+            RESTORE_UPDATE_DELETE,
+        ),
+        (
+            "audit_events_no_update_delete",
+            f"BEFORE UPDATE OF action OR DELETE {T} FOR EACH ROW",
+            RESTORE_UPDATE_DELETE,
+        ),
+        (
+            "audit_events_no_update_delete",
+            f"BEFORE UPDATE OR DELETE {T} FOR EACH ROW WHEN (false)",
+            RESTORE_UPDATE_DELETE,
+        ),
+        (
+            "audit_events_no_truncate",
+            f"BEFORE TRUNCATE OR INSERT {T} FOR EACH STATEMENT",
+            RESTORE_TRUNCATE,
+        ),
+        ("audit_events_no_truncate", f"AFTER TRUNCATE {T} FOR EACH STATEMENT", RESTORE_TRUNCATE),
+    ],
+)
+def test_a_rewritten_trigger_is_caught(engine, db_roles, trigger, clause, restore):
+    _admin(
+        db_roles,
+        f"DROP TRIGGER {trigger} {T}; CREATE TRIGGER {trigger} {clause}"
+        " EXECUTE FUNCTION broker.audit_events_append_only()",
+    )
+    try:
+        with pytest.raises(DatabaseStartupError) as caught:
+            verify_database(engine)
+    finally:
+        _admin(db_roles, restore)
+    assert f"broker.audit_events.{trigger} has been changed" in str(caught.value)
+    verify_database(engine)
+
+
+def test_a_rewritten_function_body_is_caught(engine, db_roles):
+    with db_roles.admin_engine.connect() as connection:
+        original = connection.execute(
+            text("SELECT pg_get_functiondef('broker.audit_events_append_only()'::regprocedure)")
+        ).scalar_one()
+    _admin(
+        db_roles,
+        "CREATE OR REPLACE FUNCTION broker.audit_events_append_only() RETURNS trigger"
+        " LANGUAGE plpgsql AS $$ BEGIN RETURN NULL; END; $$",
+    )
+    try:
+        with pytest.raises(DatabaseStartupError) as caught:
+            verify_database(engine)
+    finally:
+        # The body contains `%`, so it goes to the driver unparsed, as pg.py does.
+        with db_roles.admin_engine.begin() as connection:
+            connection.connection.cursor().execute(original)
+    assert "Function broker.audit_events_append_only() has been changed." in str(caught.value)
     verify_database(engine)

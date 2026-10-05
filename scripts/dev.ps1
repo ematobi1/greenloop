@@ -14,7 +14,8 @@ Starts one GreenLoop component for local development.
 -Service stack always passes --build. `docker compose up --force-recreate` alone
 recreates containers from the old image, so code pulled from main never runs.
 --wait makes it fail when a service exits at startup, for example on the database
-startup check (docs/database-roles.md, Troubleshooting).
+startup check (docs/database-roles.md, Troubleshooting). It does not catch a database
+that goes away later.
 #>
 param(
     [ValidateSet('orchestrator', 'broker', 'web', 'db', 'stack')]
@@ -47,6 +48,7 @@ if ($command.Exe -eq 'docker') {
     $ErrorActionPreference = 'Continue'
     docker info *> $null
     if ($LASTEXITCODE -ne 0) { throw 'Docker is not running. Start Docker Desktop and retry.' }
+    $ErrorActionPreference = 'Stop'
 }
 
 Set-Location (Join-Path $root $command.Dir)

@@ -36,6 +36,10 @@ PR5b adds an `Approval` contract in contracts 0.3.0, a Postgres approval store a
 17. **`scripts/db/` is shared glue.** The role and ownership SQL belongs to neither service. Both services' Postgres tests run those files (the same ones the PowerShell wrappers run) so each suite proves its own role works; a change there must pass both suites. This is the one place both test suites read outside their service, alongside the contracts package.
 18. **Each container gets only its own variables.** Compose has no shared `env_file`: the orchestrator receives its database URL, the service token and its AI settings; the broker receives its database URL and approval lifetime. Neither sees the other's database password or the bootstrap superuser's. `scripts/tests/test-compose-secrets.ps1` checks it.
 
+### Added 2026-10-04 (database startup checks)
+
+19. **Each service checks its database at startup.** The orchestrator and the broker refuse to start unless their schema exists, every relation in it is owned by their own role, and migrations are at head; the broker also checks that both `audit_events` append-only triggers and their function are exactly as migrated and enabled. This enforces rules 1 and 16 rather than changing them; it detects drift at the next start, not while running (see Known gaps). The two `app/db/startup_check.py` copies share their generic part verbatim. See [database roles](../database-roles.md#troubleshooting).
+
 ## Consequences
 
 - The broker becomes a database service with its own migrations and role.

@@ -6,7 +6,7 @@ from sqlalchemy import create_engine
 
 from app import main
 from app.config import BrokerSettings
-from app.db.startup_check import DatabaseStartupError, error_message
+from app.db.startup_check import DatabaseStartupError, error_message, verify_database
 
 
 @pytest.fixture
@@ -51,7 +51,7 @@ def test_a_failing_check_stops_startup(monkeypatch):
 
 
 def test_error_message_lists_problems_the_fix_and_the_doc():
-    assert error_message(["a is wrong.", "b is wrong."], "Do c.").splitlines() == [
+    assert error_message("broker", ["a is wrong.", "b is wrong."], "Do c.").splitlines() == [
         "The broker database is not ready:",
         "  - a is wrong.",
         "  - b is wrong.",
@@ -59,3 +59,17 @@ def test_error_message_lists_problems_the_fix_and_the_doc():
         "  - Do c.",
         "See docs/database-roles.md, section Troubleshooting.",
     ]
+
+
+def test_an_unreachable_database_names_no_host_user_or_password():
+    engine = create_engine(
+        "postgresql+psycopg://synthetic-user:synthetic-pass@127.0.0.1:1/synthetic-db",
+        connect_args={"connect_timeout": 2},
+    )
+    with pytest.raises(DatabaseStartupError) as caught:
+        verify_database(engine)
+    message = str(caught.value)
+    assert message.startswith("The broker database could not be checked (")
+    for detail in ("synthetic-user", "synthetic-pass", "127.0.0.1", "synthetic-db"):
+        assert detail not in message
+    assert caught.value.__suppress_context__

@@ -69,3 +69,17 @@ def test_an_unmigrated_database_is_caught(engine, db_roles):
             verify_database(engine)
     finally:
         _admin(db_roles, "ALTER TABLE public.zz_alembic_version_hidden RENAME TO alembic_version")
+
+
+def test_a_database_ahead_of_the_image_says_rebuild(engine, db_roles):
+    head = ScriptDirectory(str(MIGRATIONS_DIR)).get_current_head()
+    _admin(db_roles, "UPDATE public.alembic_version SET version_num = 'zz_from_a_newer_image'")
+    try:
+        with pytest.raises(DatabaseStartupError) as caught:
+            verify_database(engine)
+    finally:
+        _admin(db_roles, "UPDATE public.alembic_version SET version_num = :v", v=head)
+    message = str(caught.value)
+    assert "zz_from_a_newer_image, which this image doesn't know" in message
+    assert "dev.ps1 -Service stack" in message
+    assert "alembic upgrade" not in message
