@@ -46,3 +46,7 @@ SCAFFOLD_PROMPT.md
 
 # Dev-loop working memory (local only)
 .dev-loop/
+
+# Playwright output (apps/web)
+test-results/
+playwright-report/
