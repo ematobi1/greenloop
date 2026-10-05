@@ -6,6 +6,8 @@ import { createServer } from "node:http";
 export const E2E_TOKEN = "glp_e2e-synthetic-token_9f8e7d6c5b4a";
 
 const CONV_PREFIX = "conv-";
+// The real orchestrator's MAX_PAGE_SIZE; larger limits get its 422.
+const MAX_PAGE_SIZE = 100;
 const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-store" };
 
 export function startMockOrchestrator(port) {
@@ -56,11 +58,29 @@ export function startMockOrchestrator(port) {
     response.end();
   }
 
+  function createConversation(title) {
+    const id = `${CONV_PREFIX}${String(nextId++).padStart(32, "0")}`;
+    const row = { conversation_id: id, title, created_at: now(), updated_at: now() };
+    conversations.unshift(row);
+    messages.set(id, []);
+    return row;
+  }
+
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://mock");
     if (url.pathname === "/__revoke" && request.method === "POST") {
       revoked = true;
       return json(response, 200, {});
+    }
+    if (url.pathname === "/__seed-long" && request.method === "POST") {
+      const row = createConversation("Long conversation");
+      for (let i = 1; i <= 150; i++) message(row.conversation_id, i % 2 ? "user" : "assistant", `Message ${i}`);
+      return json(response, 201, row);
+    }
+    const limit = Number(url.searchParams.get("limit") ?? MAX_PAGE_SIZE);
+    const offset = Number(url.searchParams.get("offset") ?? 0);
+    if (!(limit >= 1 && limit <= MAX_PAGE_SIZE) || !(offset >= 0)) {
+      return json(response, 422, { error: { code: "VALIDATION_FAILED", message: "Request validation failed.", fields: { limit: "out of range" } } });
     }
     if (request.headers.authorization !== `Bearer ${E2E_TOKEN}` || revoked) {
       return fail(response, 401, "UNAUTHENTICATED", "Missing or invalid API token.");
@@ -70,20 +90,19 @@ export function startMockOrchestrator(port) {
     const data = body ? JSON.parse(body) : {};
 
     if (url.pathname === "/v1/conversations" && request.method === "GET") {
-      return json(response, 200, { data: conversations, meta: { total: conversations.length, limit: 100, offset: 0 } });
+      return json(response, 200, {
+        data: conversations.slice(offset, offset + limit),
+        meta: { total: conversations.length, limit, offset },
+      });
     }
     if (url.pathname === "/v1/conversations" && request.method === "POST") {
-      const id = `${CONV_PREFIX}${String(nextId++).padStart(32, "0")}`;
-      const row = { conversation_id: id, title: data.title ?? "New conversation", created_at: now(), updated_at: now() };
-      conversations.unshift(row);
-      messages.set(id, []);
-      return json(response, 201, row);
+      return json(response, 201, createConversation(data.title ?? "New conversation"));
     }
     const match = /^\/v1\/conversations\/([^/]+)\/messages$/.exec(url.pathname);
     if (match && messages.has(match[1])) {
       if (request.method === "GET") {
         const list = messages.get(match[1]);
-        return json(response, 200, { data: list, meta: { total: list.length, limit: 500, offset: 0 } });
+        return json(response, 200, { data: list.slice(offset, offset + limit), meta: { total: list.length, limit, offset } });
       }
       if (request.method === "POST" && request.headers.accept === "text/event-stream") {
         return reply(response, match[1], data.content);

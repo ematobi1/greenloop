@@ -165,4 +165,5 @@ This document maps every folder to its role, owning component and roadmap phase.
 - Each Python package and service has its own `tests/` and runs independently.
 - Security and behavior tests live in each service's `tests/security/`.
 - Prompt and injection evals live only in the top-level `evals/`.
-- Cross-service tests live in `tests/e2e/`.
+- Cross-service tests live in `tests/e2e/`, reserved for runs against the real web app, orchestrator and broker.
+- App-local browser tests against a mock orchestrator live in `apps/web/e2e/` (`npm run test:e2e`).

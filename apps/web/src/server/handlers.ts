@@ -3,7 +3,7 @@
 // orchestrator; there is no catch-all proxy.
 
 import type { ServerConfig } from "./config.ts";
-import { readJsonBody, rejectCrossSite, rejectNonJson } from "./guard.ts";
+import { BODY_TOO_LARGE, readJsonBody, rejectCrossSite, rejectNonJson } from "./guard.ts";
 import { emptyResponse, errorResponse, jsonResponse } from "./http.ts";
 import { callOrchestrator, relayError, type Upstream, UpstreamFailure } from "./orchestrator.ts";
 import { clearedSessionCookie, isPlausibleToken, readSessionToken, sessionCookie } from "./session.ts";
@@ -11,12 +11,19 @@ import { clearedSessionCookie, isPlausibleToken, readSessionToken, sessionCookie
 export type Deps = Upstream & { config: ServerConfig };
 
 const CONVERSATION_ID = /^conv-[0-9a-f]{32}$/;
+// Loose outer bounds only, to cap what this server buffers; the orchestrator enforces
+// the real limits (its default message limit is much lower) and its 422 is relayed.
 const MAX_TITLE_CHARS = 200;
 const MAX_MESSAGE_CHARS = 200_000;
+const SMALL_BODY_BYTES = 8 * 1024;
+const MESSAGE_BODY_BYTES = 1024 * 1024;
+// The orchestrator's MAX_PAGE_SIZE (services/orchestrator/app/api/v1/pagination.py).
+export const PAGE_SIZE = 100;
+const MAX_OFFSET = 1_000_000_000;
 
 const SSE_HEADERS = {
   "Content-Type": "text/event-stream",
-  "Cache-Control": "no-store",
+  "Cache-Control": "no-store, no-transform",
   "X-Accel-Buffering": "no",
 };
 
@@ -24,6 +31,10 @@ function signedOut(): Response {
   return errorResponse(401, "SIGNED_OUT", "Sign in with your GreenLoop API token.", {
     "Set-Cookie": clearedSessionCookie(),
   });
+}
+
+function tooLarge(): Response {
+  return errorResponse(413, "BODY_TOO_LARGE", "That request is too large.");
 }
 
 function badConversationId(): Response {
@@ -57,14 +68,11 @@ async function forwardJson(
   return jsonResponse(await response.json(), successStatus);
 }
 
-export function sessionStatus(request: Request): Response {
-  return jsonResponse({ signed_in: readSessionToken(request) !== null });
-}
-
 export async function signIn(request: Request, deps: Deps): Promise<Response> {
   const rejected = guarded(request, deps, true);
   if (rejected) return rejected;
-  const body = await readJsonBody(request);
+  const body = await readJsonBody(request, SMALL_BODY_BYTES);
+  if (body === BODY_TOO_LARGE) return tooLarge();
   const token = typeof body === "object" && body !== null ? (body as { token?: unknown }).token : undefined;
   if (!isPlausibleToken(token)) {
     return validationFailed("token", "Paste the API token exactly as issued.");
@@ -99,7 +107,7 @@ export async function listConversations(request: Request, deps: Deps): Promise<R
   if (!token) return signedOut();
   return forwardJson(
     deps,
-    { method: "GET", path: "/v1/conversations?limit=100", token, signal: request.signal },
+    { method: "GET", path: `/v1/conversations?limit=${PAGE_SIZE}`, token, signal: request.signal },
     200,
   );
 }
@@ -109,7 +117,8 @@ export async function createConversation(request: Request, deps: Deps): Promise<
   if (rejected) return rejected;
   const token = readSessionToken(request);
   if (!token) return signedOut();
-  const body = await readJsonBody(request);
+  const body = await readJsonBody(request, SMALL_BODY_BYTES);
+  if (body === BODY_TOO_LARGE) return tooLarge();
   const title = typeof body === "object" && body !== null ? (body as { title?: unknown }).title : undefined;
   if (title !== undefined && (typeof title !== "string" || !title.trim() || title.length > MAX_TITLE_CHARS)) {
     return validationFailed("title", `Use 1 to ${MAX_TITLE_CHARS} characters.`);
@@ -125,9 +134,17 @@ export async function listMessages(request: Request, conversationId: string, dep
   const token = readSessionToken(request);
   if (!token) return signedOut();
   if (!CONVERSATION_ID.test(conversationId)) return badConversationId();
+  const offsetParam = new URL(request.url).searchParams.get("offset") ?? "0";
+  const offset = /^\d{1,10}$/.test(offsetParam) ? Number(offsetParam) : NaN;
+  if (!(offset <= MAX_OFFSET)) return validationFailed("offset", "Use a whole number of 0 or more.");
   return forwardJson(
     deps,
-    { method: "GET", path: `/v1/conversations/${conversationId}/messages?limit=500`, token, signal: request.signal },
+    {
+      method: "GET",
+      path: `/v1/conversations/${conversationId}/messages?limit=${PAGE_SIZE}&offset=${offset}`,
+      token,
+      signal: request.signal,
+    },
     200,
   );
 }
@@ -140,7 +157,8 @@ export async function sendMessage(request: Request, conversationId: string, deps
   const token = readSessionToken(request);
   if (!token) return signedOut();
   if (!CONVERSATION_ID.test(conversationId)) return badConversationId();
-  const body = await readJsonBody(request);
+  const body = await readJsonBody(request, MESSAGE_BODY_BYTES);
+  if (body === BODY_TOO_LARGE) return tooLarge();
   const content = typeof body === "object" && body !== null ? (body as { content?: unknown }).content : undefined;
   if (typeof content !== "string" || !content.trim() || content.length > MAX_MESSAGE_CHARS) {
     return validationFailed("content", "Write a message first.");

@@ -4,7 +4,7 @@ import { dirname, join, relative } from "node:path";
 import { afterEach, test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { ApiError, streamMessage } from "../src/lib/api.ts";
+import { ApiError, listMessages, streamMessage } from "../src/lib/api.ts";
 import { GENERIC_ERROR, isSignedOut, messageFor } from "../src/lib/errors.ts";
 import { createSseParser } from "../src/lib/sse.ts";
 
@@ -162,4 +162,25 @@ test("security headers are set for every path", async () => {
   assert.equal(headers["X-Content-Type-Options"], "nosniff");
   assert.equal(headers["Referrer-Policy"], "no-referrer");
   assert.equal(config.poweredByHeader, false);
+});
+
+test("a long conversation loads its latest page and counts what is hidden", async () => {
+  const urls = [];
+  const rows = (from, to) => Array.from({ length: to - from }, (_, i) => ({ content: String(from + i + 1) }));
+  globalThis.fetch = async (url) => {
+    urls.push(url);
+    const offset = Number(new URL(url, "http://x").searchParams.get("offset") ?? 0);
+    return Response.json({ data: rows(offset, Math.min(offset + 100, 150)), meta: { total: 150, limit: 100, offset } });
+  };
+  const { messages, hidden } = await listMessages(CONV);
+  assert.deepEqual(urls, [`/api/conversations/${CONV}/messages`, `/api/conversations/${CONV}/messages?offset=50`]);
+  assert.equal(messages.length, 100);
+  assert.equal(messages.at(-1).content, "150");
+  assert.equal(hidden, 50);
+});
+
+test("a short conversation needs one request and hides nothing", async () => {
+  const calls = serve(Response.json({ data: [{ content: "a" }], meta: { total: 1, limit: 100, offset: 0 } }));
+  assert.deepEqual(await listMessages(CONV), { messages: [{ content: "a" }], hidden: 0 });
+  assert.equal(calls.length, 1);
 });

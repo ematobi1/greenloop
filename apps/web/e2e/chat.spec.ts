@@ -109,6 +109,18 @@ test("busy and not-configured errors show their own messages and keep the draft"
   await expect(alert).toContainText("No AI provider is configured");
 });
 
+test("a long conversation opens on its latest messages", async ({ page, request }) => {
+  await request.post(`http://127.0.0.1:${MOCK_PORT}/__seed-long`);
+  await signIn(page);
+  await page.getByRole("button", { name: "Long conversation" }).click();
+  const texts = page.locator(".message__text");
+  await expect(texts).toHaveCount(100);
+  await expect(texts.first()).toHaveText("Message 51");
+  await expect(texts.last()).toHaveText("Message 150");
+  await expect(page.getByText("50 earlier messages aren't shown.")).toBeVisible();
+  await expect(page.locator(".chat__error")).toHaveText("");
+});
+
 test("security headers are on pages and API routes", async ({ request }) => {
   for (const path of ["/", "/chat", "/api/session"]) {
     const response = await request.get(path);

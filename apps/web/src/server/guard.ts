@@ -19,9 +19,30 @@ export function rejectNonJson(request: Request): Response | null {
   return null;
 }
 
-export async function readJsonBody(request: Request): Promise<unknown> {
+export const BODY_TOO_LARGE = Symbol("body too large");
+
+// Reads at most maxBytes before giving up, so an oversized body is never buffered.
+// Returns undefined for anything that isn't valid JSON.
+export async function readJsonBody(request: Request, maxBytes: number): Promise<unknown> {
+  const declared = Number(request.headers.get("content-length") ?? "0");
+  if (declared > maxBytes) return BODY_TOO_LARGE;
+  if (!request.body) return undefined;
+  const reader = request.body.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  let size = 0;
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > maxBytes) {
+      await reader.cancel();
+      return BODY_TOO_LARGE;
+    }
+    text += decoder.decode(value, { stream: true });
+  }
   try {
-    return await request.json();
+    return JSON.parse(text + decoder.decode());
   } catch {
     return undefined;
   }
