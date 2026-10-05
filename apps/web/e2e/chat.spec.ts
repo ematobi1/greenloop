@@ -122,7 +122,7 @@ test("a long conversation opens on its latest messages", async ({ page, request 
 });
 
 test("security headers are on pages and API routes", async ({ request }) => {
-  for (const path of ["/", "/chat", "/api/session"]) {
+  for (const path of ["/", "/chat", "/api/conversations"]) {
     const response = await request.get(path);
     const headers = response.headers();
     expect(headers["x-frame-options"], path).toBe("DENY");
