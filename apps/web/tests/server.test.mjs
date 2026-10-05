@@ -89,7 +89,7 @@ test("state-changing bodies must be JSON", async () => {
   for (const type of [null, "text/plain", "application/x-www-form-urlencoded", "multipart/form-data"]) {
     assert.equal(rejectNonJson(typed(type))?.status, 415, String(type));
   }
-  assert.equal(await readJsonBody(new Request("http://x/", { method: "POST", body: "{bad" })), undefined);
+  assert.equal(await readJsonBody(new Request("http://x/", { method: "POST", body: "{bad" }), 1024), undefined);
 });
 
 test("error bodies keep only code, message and string fields", () => {
@@ -177,4 +177,17 @@ test("relayed errors are sanitized, and a 401 clears the session cookie", async 
   const garbage = await relayError(new Response("<html>oops</html>", { status: 500 }));
   assert.equal(garbage.status, 502);
   assert.equal((await garbage.json()).error.code, "ORCHESTRATOR_ERROR");
+});
+
+test("a body whose upload fails reads as no body instead of throwing", async () => {
+  const broken = new Request("http://x/", {
+    method: "POST",
+    body: new ReadableStream({
+      pull(controller) {
+        controller.error(new Error("client went away"));
+      },
+    }),
+    duplex: "half",
+  });
+  assert.equal(await readJsonBody(broken, 1024), undefined);
 });

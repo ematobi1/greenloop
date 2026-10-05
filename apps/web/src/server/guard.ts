@@ -31,15 +31,20 @@ export async function readJsonBody(request: Request, maxBytes: number): Promise<
   const decoder = new TextDecoder();
   let text = "";
   let size = 0;
-  for (;;) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > maxBytes) {
-      await reader.cancel();
-      return BODY_TOO_LARGE;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > maxBytes) {
+        await reader.cancel();
+        return BODY_TOO_LARGE;
+      }
+      text += decoder.decode(value, { stream: true });
     }
-    text += decoder.decode(value, { stream: true });
+  } catch {
+    // The client went away mid-upload.
+    return undefined;
   }
   try {
     return JSON.parse(text + decoder.decode());
