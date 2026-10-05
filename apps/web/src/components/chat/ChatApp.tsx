@@ -22,6 +22,8 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   const [signedIn, setSignedIn] = useState(initiallySignedIn);
   const [notice, setNotice] = useState<string | null>(null);
   const [conversations, setConversations] = useState<api.Conversation[]>([]);
+  const [conversationTotal, setConversationTotal] = useState(0);
+  const [hidden, setHidden] = useState(0);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<Shown[]>([]);
   const [draft, setDraft] = useState("");
@@ -52,13 +54,23 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
 
   useEffect(() => {
     if (!signedIn) return;
-    api.listConversations().then(setConversations, handle);
+    api.listConversations().then(({ conversations: rows, total }) => {
+      setConversations(rows);
+      setConversationTotal(total);
+    }, handle);
   }, [signedIn, handle]);
 
   useEffect(() => {
     if (!activeId) return;
     let current = true;
-    api.listMessages(activeId).then((rows) => current && setMessages(rows.map(shown)), handle);
+    api.listMessages(activeId).then(
+      (page) => {
+        if (!current) return;
+        setMessages(page.messages.map(shown));
+        setHidden(page.hidden);
+      },
+      (caught) => current && handle(caught),
+    );
     return () => {
       current = false;
     };
@@ -68,6 +80,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     if (streaming !== null) return;
     setError(null);
     setMessages([]);
+    setHidden(0);
     setActiveId(conversationId);
   }
 
@@ -78,6 +91,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     try {
       const created = await api.createConversation();
       setConversations((current) => [created, ...current]);
+      setConversationTotal((total) => total + 1);
       select(created.conversation_id);
     } catch (caught) {
       handle(caught);
@@ -97,7 +111,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
         content,
         {
           onUserMessage: (message) => {
-            setDraft("");
+            setDraft((current) => (current === content ? "" : current));
             setMessages((current) => [...current, shown(message)]);
           },
           onDelta: (text) => setStreaming((current) => (current ?? "") + text),
@@ -157,7 +171,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   return (
     <div className="chat">
       <aside className="chat__sidebar" aria-label="Conversations">
-        <button type="button" className="button" onClick={() => void newConversation()}>
+        <button type="button" className="button" disabled={streaming !== null} onClick={() => void newConversation()}>
           Start a conversation
         </button>
         <ul className="chat__conversations">
@@ -174,6 +188,9 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
             </li>
           ))}
         </ul>
+        {conversationTotal > conversations.length && (
+          <p className="chat__empty">Showing your {conversations.length} most recent conversations.</p>
+        )}
         <button type="button" className="button button--quiet" onClick={() => void signOut()}>
           Sign out
         </button>
@@ -184,6 +201,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
           <p className="chat__empty">Pick a conversation or start a new one.</p>
         ) : (
           <>
+            {hidden > 0 && <p className="chat__empty">{hidden} earlier messages aren&apos;t shown.</p>}
             <ol className="chat__messages">
               {messages.map((message) => (
                 <li key={message.key} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>

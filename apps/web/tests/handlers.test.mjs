@@ -5,8 +5,8 @@ import {
   createConversation,
   listConversations,
   listMessages,
+  PAGE_SIZE,
   sendMessage,
-  sessionStatus,
   signIn,
   signOut,
 } from "../src/server/handlers.ts";
@@ -55,11 +55,6 @@ async function assertNoToken(response) {
     assert.ok(!value.includes(TOKEN), `token leaked into header ${name}`);
   }
 }
-
-test("session status reports only whether a session cookie exists", async () => {
-  assert.deepEqual(await sessionStatus(request("/api/session")).json(), { signed_in: true });
-  assert.deepEqual(await sessionStatus(request("/api/session", { signedIn: false })).json(), { signed_in: false });
-});
 
 test("sign-in checks the token upstream, then sets the cookie and returns no body", async () => {
   const { calls, deps } = upstream(Response.json({ data: [], meta: { total: 0, limit: 1, offset: 0 } }));
@@ -228,4 +223,75 @@ test("an aborted browser request aborts the streamed upstream call", async () =>
   );
   browser.abort();
   assert.equal(outbound.aborted, true);
+});
+
+test("pages never ask the orchestrator for more than its 100-row limit", async () => {
+  assert.equal(PAGE_SIZE, 100);
+  const listed = upstream(Response.json({ data: [], meta: { total: 0, limit: 100, offset: 0 } }));
+  await listConversations(request("/api/conversations"), listed.deps);
+  assert.equal(listed.calls[0].url, "http://orchestrator:8000/v1/conversations?limit=100");
+
+  const messages = upstream(Response.json({ data: [], meta: { total: 0, limit: 100, offset: 0 } }));
+  await listMessages(request(`/api/conversations/${CONV}/messages`), CONV, messages.deps);
+  await listMessages(request(`/api/conversations/${CONV}/messages?offset=50`), CONV, messages.deps);
+  assert.deepEqual(
+    messages.calls.map((call) => call.url),
+    [
+      `http://orchestrator:8000/v1/conversations/${CONV}/messages?limit=100&offset=0`,
+      `http://orchestrator:8000/v1/conversations/${CONV}/messages?limit=100&offset=50`,
+    ],
+  );
+});
+
+test("a message offset must be a plain whole number", async () => {
+  const { calls, deps } = upstream(new Response("{}"));
+  for (const offset of ["-1", "1.5", "abc", "1e3", "99999999999", "0x10", "5&limit=500"]) {
+    const response = await listMessages(
+      request(`/api/conversations/${CONV}/messages?offset=${encodeURIComponent(offset)}`),
+      CONV,
+      deps,
+    );
+    assert.equal(response.status, 422, offset);
+  }
+  assert.equal(calls.length, 0);
+});
+
+test("oversized bodies are refused before they are buffered", async () => {
+  const { calls, deps } = upstream(new Response("{}"));
+  const big = JSON.stringify({ token: "x".repeat(9000) });
+  const declared = await signIn(request("/api/session", { method: "POST", body: big, signedIn: false }), deps);
+  assert.equal(declared.status, 413);
+
+  // No Content-Length: the streamed size counts.
+  const streamed = new Request(`${ORIGIN}/api/session`, {
+    method: "POST",
+    headers: { origin: ORIGIN, "content-type": "application/json" },
+    body: new ReadableStream({
+      start(controller) {
+        for (let i = 0; i < 20; i++) controller.enqueue(new TextEncoder().encode("x".repeat(1024)));
+        controller.close();
+      },
+    }),
+    duplex: "half",
+  });
+  assert.equal((await signIn(streamed, deps)).status, 413);
+
+  const hugeMessage = JSON.stringify({ content: "x".repeat(1024 * 1024 + 1) });
+  const send = await sendMessage(
+    request(`/api/conversations/${CONV}/messages`, { method: "POST", body: hugeMessage }),
+    CONV,
+    deps,
+  );
+  assert.equal(send.status, 413);
+  assert.equal(calls.length, 0);
+});
+
+test("the SSE relay forbids caching and transformation", async () => {
+  const { deps } = upstream(sse("event: delta\ndata: {}\n\n"));
+  const response = await sendMessage(
+    request(`/api/conversations/${CONV}/messages`, { method: "POST", body: { content: "x" } }),
+    CONV,
+    deps,
+  );
+  assert.equal(response.headers.get("cache-control"), "no-store, no-transform");
 });

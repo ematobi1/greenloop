@@ -1,5 +1,8 @@
 // Browser-side calls to this app's own /api routes. Same origin only: the browser
 // never learns the orchestrator's address or the token.
+//
+// The shapes below mirror ConversationOut, MessageOut and the SSE events in
+// services/orchestrator/app/api/v1/chat.py, which is the source of truth (ADR 0010).
 
 import type { ApiFailure } from "./errors.ts";
 import { createSseParser } from "./sse.ts";
@@ -59,16 +62,28 @@ export async function signOut(): Promise<void> {
   await send("/api/session", { method: "DELETE" });
 }
 
-export async function listConversations(): Promise<Conversation[]> {
-  return (await (await send("/api/conversations")).json()).data;
+type Page<T> = { data: T[]; meta: { total: number; limit: number; offset: number } };
+
+// The orchestrator returns at most 100 rows per page, newest conversations first.
+export async function listConversations(): Promise<{ conversations: Conversation[]; total: number }> {
+  const page: Page<Conversation> = await (await send("/api/conversations")).json();
+  return { conversations: page.data, total: page.meta.total };
 }
 
 export async function createConversation(): Promise<Conversation> {
   return (await send("/api/conversations", { method: "POST", headers: JSON_HEADERS, body: "{}" })).json();
 }
 
-export async function listMessages(conversationId: string): Promise<Message[]> {
-  return (await (await send(`/api/conversations/${encodeURIComponent(conversationId)}/messages`)).json()).data;
+// Messages come oldest first, 100 per page. A long conversation shows its latest page;
+// `hidden` counts the earlier messages left out.
+export async function listMessages(conversationId: string): Promise<{ messages: Message[]; hidden: number }> {
+  const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages`;
+  let page: Page<Message> = await (await send(path)).json();
+  if (page.meta.total > page.data.length) {
+    const offset = Math.max(page.meta.total - page.meta.limit, 0);
+    page = await (await send(`${path}?offset=${offset}`)).json();
+  }
+  return { messages: page.data, hidden: page.meta.offset };
 }
 
 export type StreamHandlers = {
