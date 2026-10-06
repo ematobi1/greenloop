@@ -139,6 +139,49 @@ test("a message can be saved to memory once", async ({ page }) => {
   await expect(page.locator(".chat__error")).toHaveText("");
 });
 
+test("the memory page lists, searches, corrects, shows history, replaces and deletes", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("link", { name: "Memory" }).click();
+  const items = page.locator(".memory__item");
+  await expect(items).toHaveCount(1);
+  await expect(items.first().locator(".message__text")).toHaveText("I prefer green tea");
+
+  await page.getByLabel("Search memory").fill("coffee");
+  await page.getByRole("button", { name: "Search" }).click();
+  await expect(items).toHaveCount(0);
+  await expect(page.getByText("Nothing matches that search.")).toBeVisible();
+  await page.getByLabel("Search memory").fill("tea");
+  await page.getByRole("button", { name: "Search" }).click();
+  await expect(items).toHaveCount(1);
+
+  await items.first().getByRole("button", { name: "Correct" }).click();
+  await page.getByLabel("Correct memory").fill("I prefer jasmine tea");
+  await page.getByRole("button", { name: "Save correct" }).click();
+  await expect(page.locator(".chat__notice")).toHaveText("Memory corrected.");
+  await expect(items.first().locator(".message__text").first()).toHaveText("I prefer jasmine tea");
+  await expect(items.first()).toContainText("corrected");
+
+  await items.first().getByRole("button", { name: "History" }).click();
+  const versions = items.first().locator(".memory__history li");
+  await expect(versions).toHaveCount(2);
+  await expect(versions.nth(0)).toContainText("I prefer green tea");
+  await expect(versions.nth(1)).toContainText("I prefer jasmine tea");
+
+  await items.first().getByRole("button", { name: "Replace" }).click();
+  await page.getByLabel("Replace memory").fill("<b>I prefer oolong tea</b>");
+  await page.getByRole("button", { name: "Save replace" }).click();
+  await expect(page.locator(".chat__notice")).toHaveText("Memory replaced.");
+  await expect(items.first().locator(".message__text").first()).toHaveText("<b>I prefer oolong tea</b>");
+  await expect(page.locator(".memory b")).toHaveCount(0);
+
+  await items.first().getByRole("button", { name: "Delete" }).click();
+  await expect(items).toHaveCount(1);
+  await items.first().getByRole("button", { name: "Confirm delete" }).click();
+  await expect(page.locator(".chat__notice")).toHaveText("Memory deleted. It won't be used in chat again.");
+  await expect(items).toHaveCount(0);
+  await expect(page.locator(".chat__error")).toHaveText("");
+});
+
 test("a long conversation opens on its latest messages", async ({ page, request }) => {
   await request.post(`http://127.0.0.1:${MOCK_PORT}/__seed-long`);
   await signIn(page);

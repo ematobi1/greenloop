@@ -1,5 +1,9 @@
-import SectionPage from "@/components/SectionPage";
+import { cookies } from "next/headers";
 
-export default function Page() {
-  return <SectionPage slug="memory" />;
+import MemoryApp from "@/components/memory/MemoryApp";
+import { SESSION_COOKIE } from "@/server/session";
+
+export default async function Page() {
+  const signedIn = (await cookies()).has(SESSION_COOKIE);
+  return <MemoryApp initiallySignedIn={signedIn} />;
 }

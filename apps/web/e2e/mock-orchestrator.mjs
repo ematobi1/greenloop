@@ -61,6 +61,25 @@ export function startMockOrchestrator(port) {
     response.end();
   }
 
+  const memory = new Map();
+
+  function addMemory(content, operation, predecessor) {
+    const record = {
+      record_id: `mem-${String(nextId++).padStart(32, "0")}`,
+      principal_id: "user-1",
+      scope: "private",
+      category: "user_context",
+      confidence: operation === "correct" ? "corrected" : "unverified",
+      content,
+      created_at: now(),
+      provenance: { source: "user", source_ref: null, operation, supersedes: predecessor?.record_id ?? null },
+      live: true,
+    };
+    record.chain = predecessor?.chain ?? record.record_id;
+    memory.set(record.record_id, record);
+    return record;
+  }
+
   function createConversation(title) {
     const id = `${CONV_PREFIX}${String(nextId++).padStart(32, "0")}`;
     const row = { conversation_id: id, title, created_at: now(), updated_at: now() };
@@ -133,7 +152,35 @@ export function startMockOrchestrator(port) {
       if (!found) return fail(response, 404, "MESSAGE_NOT_FOUND", "Message not found.");
       if (remembered.has(found.message_id)) return fail(response, 409, "ALREADY_REMEMBERED", "Already saved.");
       remembered.add(found.message_id);
-      return json(response, 201, { record_id: `mem-${found.message_id}`, content: found.content });
+      return json(response, 201, addMemory(found.content, "create", null));
+    }
+    if (url.pathname === "/v1/memory-records" && request.method === "GET") {
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const live = [...memory.values()]
+        .filter((record) => record.live && record.content.toLowerCase().includes(q))
+        .reverse();
+      return json(response, 200, {
+        data: live.slice(offset, offset + limit),
+        meta: { total: live.length, limit, offset },
+      });
+    }
+    const memoryMatch = /^\/v1\/memory-records\/([^/]+)(\/history|\/revisions)?$/.exec(url.pathname);
+    const target = memoryMatch && memory.get(memoryMatch[1]);
+    if (memoryMatch && !target) return fail(response, 404, "MEMORY_RECORD_NOT_FOUND", "Memory record not found.");
+    if (memoryMatch?.[2] === "/history" && request.method === "GET") {
+      const chain = [...memory.values()].filter((record) => record.chain === target.chain);
+      return json(response, 200, { data: chain, meta: { total: chain.length, limit: chain.length, offset: 0 } });
+    }
+    if (memoryMatch?.[2] === "/revisions" && request.method === "POST") {
+      if (!target.live) return fail(response, 409, "MEMORY_RECORD_CONFLICT", "Not the current version.");
+      target.live = false;
+      return json(response, 201, addMemory(data.content, data.operation, target));
+    }
+    if (memoryMatch && !memoryMatch[2] && request.method === "DELETE") {
+      for (const record of memory.values()) if (record.chain === target.chain) record.live = false;
+      addMemory("", "delete", target).live = false;
+      response.writeHead(204);
+      return response.end();
     }
     const match = /^\/v1\/conversations\/([^/]+)\/messages$/.exec(url.pathname);
     if (match && messages.has(match[1])) {

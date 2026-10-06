@@ -14,6 +14,8 @@ const MESSAGES: Record<string, string> = {
   ALREADY_REMEMBERED: "That message is already saved to memory.",
   MESSAGE_INCOMPLETE: "Only a complete message can be saved to memory.",
   MESSAGE_NOT_FOUND: "That message no longer exists.",
+  MEMORY_RECORD_NOT_FOUND: "That memory no longer exists. Refresh the list.",
+  MEMORY_RECORD_CONFLICT: "This memory changed since you opened it. Refresh, then edit the latest version.",
   ORCHESTRATOR_UNAVAILABLE: "The GreenLoop server can't be reached. Try again in a moment.",
   ORCHESTRATOR_TIMEOUT: "The GreenLoop server took too long to answer. Try again.",
   CROSS_SITE_REQUEST: "This request was blocked. Reload the page and try again.",

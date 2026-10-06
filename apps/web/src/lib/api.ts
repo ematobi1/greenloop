@@ -152,3 +152,41 @@ export async function streamMessage(
   parser.end();
   if (!finished) handlers.onError({ status: 0, code: "NETWORK", message: "" }, null);
 }
+
+// Mirrors MemoryRecord in packages/contracts (memory_record.py).
+export type MemoryRecord = {
+  record_id: string;
+  category: string;
+  confidence: string;
+  content: string;
+  created_at: string;
+  provenance: { source: string; source_ref: string | null; operation: string; supersedes: string | null };
+};
+
+export async function listMemory(query = "", offset = 0): Promise<{ records: MemoryRecord[]; total: number }> {
+  const params = new URLSearchParams({ offset: String(offset) });
+  if (query.trim()) params.set("q", query.trim());
+  const page: Page<MemoryRecord> = await (await send(`/api/memory?${params}`)).json();
+  return { records: page.data, total: page.meta.total };
+}
+
+export async function memoryHistory(recordId: string): Promise<MemoryRecord[]> {
+  return (await (await send(`/api/memory/${encodeURIComponent(recordId)}/history`)).json()).data;
+}
+
+export async function reviseMemory(
+  recordId: string,
+  operation: "correct" | "supersede",
+  content: string,
+): Promise<MemoryRecord> {
+  const response = await send(`/api/memory/${encodeURIComponent(recordId)}/revisions`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ operation, content }),
+  });
+  return response.json();
+}
+
+export async function deleteMemory(recordId: string): Promise<void> {
+  await send(`/api/memory/${encodeURIComponent(recordId)}`, { method: "DELETE" });
+}

@@ -6,7 +6,11 @@ import {
   listConversations,
   listMessages,
   PAGE_SIZE,
+  deleteMemory,
+  listMemory,
+  memoryHistory,
   rememberMessage,
+  reviseMemory,
   sendMessage,
   signIn,
   signOut,
@@ -401,4 +405,68 @@ test("remember refuses bad ids, cross-site requests and missing sessions without
     401,
   );
   assert.equal(calls.length, 0);
+});
+
+const MEM = `mem-${"d".repeat(32)}`;
+const pageOf = (data) => Response.json({ data, meta: { total: data.length, limit: 100, offset: 0 } });
+
+test("memory search forwards only q, offset and the page limit", async () => {
+  const { calls, deps } = upstream(pageOf([]));
+  await listMemory(request("/api/memory?q=%20green%20tea%20&offset=100&scope=shared&limit=999"), deps);
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/v1/memory-records");
+  assert.deepEqual(Object.fromEntries(url.searchParams), { limit: "100", offset: "100", q: "green tea" });
+  for (const bad of ["?offset=-1", "?offset=x", `?q=${"x".repeat(201)}`]) {
+    assert.equal((await listMemory(request(`/api/memory${bad}`), deps)).status, 422, bad);
+  }
+  assert.equal(calls.length, 1);
+});
+
+test("memory history and delete need a real record id", async () => {
+  const { calls, deps } = upstream(pageOf([]));
+  assert.equal((await memoryHistory(request("/api/memory/x/history"), MEM, deps)).status, 200);
+  assert.equal(calls[0].url, `http://orchestrator:8000/v1/memory-records/${MEM}/history`);
+  for (const id of ["mem-1", "../x", `${MEM}/history`]) {
+    assert.equal((await memoryHistory(request("/api/memory/x/history"), id, deps)).status, 404, id);
+    assert.equal((await deleteMemory(request("/api/memory/x", { method: "DELETE" }), id, deps)).status, 404, id);
+  }
+  assert.equal(calls.length, 1);
+});
+
+test("deleting memory is a guarded DELETE upstream", async () => {
+  const { calls, deps } = upstream(new Response(null, { status: 204 }));
+  assert.equal((await deleteMemory(request("/api/memory/x", { method: "DELETE" }), MEM, deps)).status, 204);
+  assert.deepEqual([calls[0].init.method, calls[0].url], ["DELETE", `http://orchestrator:8000/v1/memory-records/${MEM}`]);
+  const forged = await deleteMemory(request("/api/memory/x", { method: "DELETE", origin: "http://evil.example" }), MEM, deps);
+  assert.equal(forged.status, 403);
+  assert.equal(calls.length, 1);
+});
+
+test("revisions forward operation and content, and never a confidence", async () => {
+  const { calls, deps } = upstream(Response.json({ record_id: MEM }, { status: 201 }));
+  const path = "/api/memory/x/revisions";
+  const ok = await reviseMemory(
+    request(path, { method: "POST", body: { operation: "correct", content: "Tea, not coffee.", confidence: "verified" } }),
+    MEM,
+    deps,
+  );
+  assert.equal(ok.status, 201);
+  assert.deepEqual(JSON.parse(calls[0].init.body), { operation: "correct", content: "Tea, not coffee." });
+  const replace = await reviseMemory(
+    request(path, { method: "POST", body: { operation: "supersede", content: "x", category: "decision" } }),
+    MEM,
+    deps,
+  );
+  assert.equal(replace.status, 201);
+  assert.deepEqual(JSON.parse(calls[1].init.body), { operation: "supersede", content: "x", category: "decision" });
+  for (const body of [
+    { operation: "delete", content: "x" },
+    { operation: "correct", content: " " },
+    { operation: "correct", content: "x".repeat(20001) },
+    { operation: "correct", content: "x", category: "decision" },
+    { operation: "supersede", content: "x", category: "made_up" },
+  ]) {
+    assert.equal((await reviseMemory(request(path, { method: "POST", body }), MEM, deps)).status, 422, JSON.stringify(body));
+  }
+  assert.equal(calls.length, 2);
 });

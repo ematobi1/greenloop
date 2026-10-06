@@ -16,7 +16,7 @@ test("sections cover the seven planned areas in nav order", () => {
   );
 });
 
-const BUILT = new Set(["chat"]);
+const BUILT = new Set(["chat", "memory"]);
 
 test("every unbuilt section has a placeholder page that renders its own slug", () => {
   for (const { slug } of SECTIONS.filter(({ slug }) => !BUILT.has(slug))) {
@@ -31,6 +31,10 @@ test("every section names a roadmap phase between 2 and 5", () => {
     assert.ok(Number.isInteger(section.phase) && section.phase >= 2 && section.phase <= 5);
     assert.ok(section.title.length > 0 && section.summary.length > 0);
   }
+});
+
+test("the memory page renders the memory app", () => {
+  assert.match(readFileSync(join(appDir, "memory", "page.tsx"), "utf8"), /<MemoryApp /);
 });
 
 test("the chat page renders the chat app", () => {

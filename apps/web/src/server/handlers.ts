@@ -252,3 +252,108 @@ export async function rememberMessage(
     201,
   );
 }
+
+const MEMORY_ID = /^mem-[0-9a-f]{32}$/;
+const MAX_QUERY_CHARS = 200;
+const MAX_MEMORY_CHARS = 20_000;
+const MEMORY_CATEGORIES = new Set([
+  "general_knowledge",
+  "project_context",
+  "task_execution_history",
+  "user_context",
+  "organization_context",
+  "decision",
+  "verified_outcome",
+  "correction",
+  "agent_performance",
+]);
+
+function memoryNotFound(): Response {
+  return errorResponse(404, "MEMORY_RECORD_NOT_FOUND", "That memory doesn't exist.");
+}
+
+function offsetFrom(request: Request): number | null {
+  const value = new URL(request.url).searchParams.get("offset") ?? "0";
+  return /^\d{1,10}$/.test(value) && Number(value) <= MAX_OFFSET ? Number(value) : null;
+}
+
+// Live memory, newest first, optionally filtered by text. Only q and offset pass through.
+export async function listMemory(request: Request, deps: Deps): Promise<Response> {
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  const offset = offsetFrom(request);
+  if (offset === null) return validationFailed("offset", "Use a whole number of 0 or more.");
+  const query = (new URL(request.url).searchParams.get("q") ?? "").trim();
+  if (query.length > MAX_QUERY_CHARS) return validationFailed("q", `Search with at most ${MAX_QUERY_CHARS} characters.`);
+  const params = new URLSearchParams({ limit: String(PAGE_SIZE), offset: String(offset) });
+  if (query) params.set("q", query);
+  return forwardJson(deps, { method: "GET", path: `/v1/memory-records?${params}`, token, signal: request.signal }, 200);
+}
+
+export async function memoryHistory(request: Request, recordId: string, deps: Deps): Promise<Response> {
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  if (!MEMORY_ID.test(recordId)) return memoryNotFound();
+  return forwardJson(
+    deps,
+    { method: "GET", path: `/v1/memory-records/${recordId}/history`, token, signal: request.signal },
+    200,
+  );
+}
+
+// Correct (content only, marks it corrected) or supersede (content and optionally category).
+// Confidence is never taken from the browser: only system principals may verify memory.
+export async function reviseMemory(request: Request, recordId: string, deps: Deps): Promise<Response> {
+  const rejected = guarded(request, deps, true);
+  if (rejected) return rejected;
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  if (!MEMORY_ID.test(recordId)) return memoryNotFound();
+  const body = await readJsonBody(request, MESSAGE_BODY_BYTES);
+  if (body === BODY_TOO_LARGE) return tooLarge();
+  const fields = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const { operation, content, category } = fields;
+  if (operation !== "correct" && operation !== "supersede") {
+    return validationFailed("operation", "Choose correct or supersede.");
+  }
+  if (typeof content !== "string" || !content.trim() || content.length > MAX_MEMORY_CHARS) {
+    return validationFailed("content", `Use 1 to ${MAX_MEMORY_CHARS} characters.`);
+  }
+  if (category !== undefined && (operation !== "supersede" || typeof category !== "string" || !MEMORY_CATEGORIES.has(category))) {
+    return validationFailed("category", "Choose a known category; only a supersede can change it.");
+  }
+  return forwardJson(
+    deps,
+    {
+      method: "POST",
+      path: `/v1/memory-records/${recordId}/revisions`,
+      token,
+      body: category === undefined ? { operation, content } : { operation, content, category },
+      signal: request.signal,
+    },
+    201,
+  );
+}
+
+// Delete is a tombstone: the chain stops being retrieved, its history remains (ADR 0011).
+export async function deleteMemory(request: Request, recordId: string, deps: Deps): Promise<Response> {
+  const rejected = guarded(request, deps, false);
+  if (rejected) return rejected;
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  if (!MEMORY_ID.test(recordId)) return memoryNotFound();
+  let response: Response;
+  try {
+    response = await callOrchestrator(deps, {
+      method: "DELETE",
+      path: `/v1/memory-records/${recordId}`,
+      token,
+      signal: request.signal,
+    });
+  } catch (error) {
+    if (error instanceof UpstreamFailure) return error.response;
+    throw error;
+  }
+  if (!response.ok) return relayError(response);
+  return emptyResponse(204);
+}
