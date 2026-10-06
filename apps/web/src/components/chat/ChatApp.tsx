@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import * as api from "@/lib/api";
 import { isSignedOut, messageFor, type ApiFailure } from "@/lib/errors";
 
+import PlanPanel from "./PlanPanel";
 import SignInForm from "./SignInForm";
 
 type Shown = { key: string; role: string; content: string; incomplete: boolean };
@@ -270,6 +271,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
                 {streaming !== null ? "Replying…" : "Send"}
               </button>
             </form>
+            <PlanPanel key={activeId} conversationId={activeId} onError={handle} />
           </>
         )}
         <p className="chat__error" role="alert">

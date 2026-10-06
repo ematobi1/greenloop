@@ -4,7 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.core.config import Settings
-from app.core.errors import ApiError, ErrorEnvelope
+from app.core.errors import ApiError, ErrorEnvelope, not_implemented
 from app.main import create_app
 
 
@@ -37,6 +37,10 @@ BUILT_ROUTES = {
     ("GET", "/v1/conversations/x-1/messages"),
     ("POST", "/v1/conversations/x-1/messages"),
     ("POST", "/v1/conversations/x-1/messages/x-1/remember"),
+    ("POST", "/v1/plans"),
+    ("GET", "/v1/plans"),
+    ("GET", "/v1/plans/x-1"),
+    ("DELETE", "/v1/plans/x-1"),
     ("GET", "/v1/agents"),
     ("GET", "/v1/agents/x-1"),
     ("POST", "/v1/dispatches"),
@@ -49,7 +53,7 @@ UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
 
 
 def test_every_v1_route_is_covered():
-    assert len(V1_ROUTES) == 26
+    assert len(V1_ROUTES) == 28
     assert set(V1_ROUTES) >= BUILT_ROUTES
 
 
@@ -90,8 +94,12 @@ def test_api_error_bodies_are_contract_error_details(settings):
     async def boom() -> None:
         raise RuntimeError("internal")
 
+    @app.get("/later")
+    async def later() -> None:
+        raise not_implemented("Something later", phase=5)
+
     client = TestClient(app, raise_server_exceptions=False)
-    for path, status in (("/v1/plans/x-1", 501), ("/v1/nope", 404), ("/boom", 500)):
+    for path, status in (("/later", 501), ("/v1/nope", 404), ("/boom", 500)):
         response = client.get(path)
         assert response.status_code == status
         ErrorEnvelope.model_validate(response.json())

@@ -6,7 +6,10 @@ import {
   listConversations,
   listMessages,
   PAGE_SIZE,
+  PLAN_TIMEOUT_MS,
   deleteMemory,
+  discardPlan,
+  draftPlan,
   listMemory,
   memoryHistory,
   rememberMessage,
@@ -469,4 +472,50 @@ test("revisions forward operation and content, and never a confidence", async ()
     assert.equal((await reviseMemory(request(path, { method: "POST", body }), MEM, deps)).status, 422, JSON.stringify(body));
   }
   assert.equal(calls.length, 2);
+});
+
+test("drafting a plan forwards only goal and conversation id, with the long timeout", async () => {
+  const { calls, deps } = upstream(Response.json({ plan_id: "plan-1" }, { status: 201 }));
+  const response = await draftPlan(
+    request("/api/plans", { method: "POST", body: { goal: "Move my blog", conversation_id: CONV, steps: [], principal_id: "x" } }),
+    deps,
+  );
+  assert.equal(response.status, 201);
+  assert.equal(calls[0].url, "http://orchestrator:8000/v1/plans");
+  assert.deepEqual(JSON.parse(calls[0].init.body), { goal: "Move my blog", conversation_id: CONV });
+  for (const body of [{}, { goal: " " }, { goal: "x".repeat(2001) }, { goal: "x", conversation_id: "../x" }]) {
+    const rejected = await draftPlan(request("/api/plans", { method: "POST", body }), deps);
+    assert.ok([404, 422].includes(rejected.status), JSON.stringify(body));
+  }
+  assert.equal(calls.length, 1);
+  assert.equal(PLAN_TIMEOUT_MS, 150_000);
+});
+
+test("plan drafting outlives the default timeout but not the plan timeout", async () => {
+  let timeout;
+  const deps = {
+    config: { orchestratorUrl: "http://orchestrator:8000", webOrigin: ORIGIN },
+    timeoutMs: 20,
+    fetch: (_url, init) =>
+      new Promise((resolve) => {
+        const timer = setTimeout(() => resolve(Response.json({ plan_id: "p" }, { status: 201 })), 60);
+        init.signal.addEventListener("abort", () => {
+          clearTimeout(timer);
+          timeout = init.signal.reason;
+        });
+      }),
+  };
+  const response = await draftPlan(request("/api/plans", { method: "POST", body: { goal: "x" } }), deps);
+  assert.equal(response.status, 201, "a slow draft is not cut off by the 20 ms default");
+  assert.equal(timeout, undefined);
+});
+
+test("discarding a plan is a guarded DELETE on a real plan id", async () => {
+  const PLAN = `plan-${"e".repeat(32)}`;
+  const { calls, deps } = upstream(new Response(null, { status: 204 }));
+  assert.equal((await discardPlan(request("/api/plans/x", { method: "DELETE" }), PLAN, deps)).status, 204);
+  assert.deepEqual([calls[0].init.method, calls[0].url], ["DELETE", `http://orchestrator:8000/v1/plans/${PLAN}`]);
+  assert.equal((await discardPlan(request("/api/plans/x", { method: "DELETE" }), "plan-1", deps)).status, 404);
+  assert.equal((await discardPlan(request("/api/plans/x", { method: "DELETE", origin: "http://evil.example" }), PLAN, deps)).status, 403);
+  assert.equal(calls.length, 1);
 });

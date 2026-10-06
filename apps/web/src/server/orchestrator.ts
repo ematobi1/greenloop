@@ -18,6 +18,8 @@ export type UpstreamCall = {
   body?: unknown;
   stream?: boolean;
   signal?: AbortSignal;
+  // Overrides the default header timeout for calls that work before answering (plan drafting).
+  timeoutMs?: number;
 };
 
 export const DEFAULT_TIMEOUT_MS = 10_000;
@@ -35,7 +37,7 @@ export class UpstreamFailure extends Error {
 // An aborted client request aborts the outbound call too, so the orchestrator stops.
 export async function callOrchestrator(upstream: Upstream, call: UpstreamCall): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort("timeout"), upstream.timeoutMs);
+  const timer = setTimeout(() => controller.abort("timeout"), call.timeoutMs ?? upstream.timeoutMs);
   const forwardAbort = () => controller.abort("client");
   call.signal?.addEventListener("abort", forwardAbort, { once: true });
   const headers: Record<string, string> = {

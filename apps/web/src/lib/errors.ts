@@ -14,6 +14,8 @@ const MESSAGES: Record<string, string> = {
   ALREADY_REMEMBERED: "That message is already saved to memory.",
   MESSAGE_INCOMPLETE: "Only a complete message can be saved to memory.",
   MESSAGE_NOT_FOUND: "That message no longer exists.",
+  PLAN_DRAFT_INVALID: "The model didn't return a usable plan. Try again, or rephrase the goal.",
+  PLAN_NOT_FOUND: "That plan no longer exists.",
   MEMORY_RECORD_NOT_FOUND: "That memory no longer exists. Refresh the list.",
   MEMORY_RECORD_CONFLICT: "This memory changed since you opened it. Refresh, then edit the latest version.",
   ORCHESTRATOR_UNAVAILABLE: "The GreenLoop server can't be reached. Try again in a moment.",

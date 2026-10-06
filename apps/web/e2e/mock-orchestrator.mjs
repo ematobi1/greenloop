@@ -62,6 +62,7 @@ export function startMockOrchestrator(port) {
   }
 
   const memory = new Map();
+  const plans = new Map();
 
   function addMemory(content, operation, predecessor) {
     const record = {
@@ -153,6 +154,31 @@ export function startMockOrchestrator(port) {
       if (remembered.has(found.message_id)) return fail(response, 409, "ALREADY_REMEMBERED", "Already saved.");
       remembered.add(found.message_id);
       return json(response, 201, addMemory(found.content, "create", null));
+    }
+    if (url.pathname === "/v1/plans" && request.method === "POST") {
+      const plan = {
+        plan_id: `plan-${String(nextId++).padStart(32, "0")}`,
+        principal_id: "user-1",
+        goal: data.goal,
+        status: "draft",
+        conversation_id: data.conversation_id ?? null,
+        steps: [
+          { title: "Export the posts", description: "Download them as Markdown.", depends_on: [] },
+          { title: "<img src=x onerror=\"window.__pwned=3\">Publish", description: "Needs your approval when run.", depends_on: [0] },
+        ],
+        created_at: now(),
+        updated_at: now(),
+      };
+      plans.set(plan.plan_id, plan);
+      return json(response, 201, plan);
+    }
+    const planMatch = /^\/v1\/plans\/([^/]+)$/.exec(url.pathname);
+    if (planMatch && request.method === "DELETE") {
+      const plan = plans.get(planMatch[1]);
+      if (!plan) return fail(response, 404, "PLAN_NOT_FOUND", "Plan not found.");
+      plan.status = "discarded";
+      response.writeHead(204);
+      return response.end();
     }
     if (url.pathname === "/v1/memory-records" && request.method === "GET") {
       const q = (url.searchParams.get("q") ?? "").toLowerCase();

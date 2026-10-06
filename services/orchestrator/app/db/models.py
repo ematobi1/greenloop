@@ -43,6 +43,8 @@ from greenloop_contracts import (
     MemoryRecord,
     MemoryScope,
     MemorySource,
+    Plan,
+    PlanStatus,
     Provenance,
 )
 
@@ -356,3 +358,34 @@ class MessageRow(TimestampMixin, Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer)
     output_tokens: Mapped[int | None] = mapped_column(Integer)
     correlation_id: Mapped[str] = mapped_column(String(128))
+
+
+class PlanRow(TimestampMixin, Base):
+    """A drafted plan (contracts Plan). Steps are stored as JSON and re-validated on read."""
+
+    __tablename__ = "plans"
+    __table_args__ = (
+        CheckConstraint(_in("status", PlanStatus), name="ck_plans_status"),
+        Index("ix_plans_principal_created", "principal_id", "created_at"),
+    )
+
+    plan_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), ForeignKey("principals.principal_id"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("conversations.conversation_id")
+    )
+    goal: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    steps: Mapped[list] = mapped_column(JSON)
+
+    def to_contract(self) -> Plan:
+        return Plan(
+            plan_id=self.plan_id,
+            principal_id=self.principal_id,
+            conversation_id=self.conversation_id,
+            goal=self.goal,
+            status=self.status,
+            steps=self.steps,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )

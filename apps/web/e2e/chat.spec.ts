@@ -182,6 +182,25 @@ test("the memory page lists, searches, corrects, shows history, replaces and del
   await expect(page.locator(".chat__error")).toHaveText("");
 });
 
+test("a plan can be drafted, shown as text, and discarded", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Start a conversation" }).click();
+  await page.getByLabel("Goal to plan").fill("Move my blog to a static site");
+  await page.getByRole("button", { name: "Draft a plan" }).click();
+  const card = page.getByRole("article", { name: "Draft plan" });
+  await expect(card).toContainText("nothing runs until you approve it");
+  await expect(card.locator(".plan__title")).toHaveText([
+    "Export the posts",
+    '<img src=x onerror="window.__pwned=3">Publish',
+  ]);
+  await expect(card).toContainText("After step 1");
+  await expect(card.locator("img")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as { __pwned?: number }).__pwned)).toBeUndefined();
+  await card.getByRole("button", { name: "Discard plan" }).click();
+  await expect(card).toHaveCount(0);
+  await expect(page.locator(".chat__error")).toHaveText("");
+});
+
 test("a long conversation opens on its latest messages", async ({ page, request }) => {
   await request.post(`http://127.0.0.1:${MOCK_PORT}/__seed-long`);
   await signIn(page);

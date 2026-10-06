@@ -293,3 +293,18 @@ a {
   padding-left: var(--space-3);
   border-left: 2px solid var(--border);
 }
+
+.plan,
+.plan__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plan__steps {
+  padding-left: var(--space-4);
+}
+
+.plan__title {
+  font-weight: 600;
+}

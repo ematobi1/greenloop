@@ -190,3 +190,16 @@ export async function reviseMemory(
 export async function deleteMemory(recordId: string): Promise<void> {
   await send(`/api/memory/${encodeURIComponent(recordId)}`, { method: "DELETE" });
 }
+
+// Mirrors Plan and PlanStep in packages/contracts (plan.py).
+export type PlanStep = { title: string; description: string; depends_on: number[] };
+export type Plan = { plan_id: string; goal: string; status: string; steps: PlanStep[]; conversation_id: string | null };
+
+export async function draftPlan(goal: string, conversationId?: string): Promise<Plan> {
+  const body = conversationId ? { goal, conversation_id: conversationId } : { goal };
+  return (await send("/api/plans", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) })).json();
+}
+
+export async function discardPlan(planId: string): Promise<void> {
+  await send(`/api/plans/${encodeURIComponent(planId)}`, { method: "DELETE" });
+}

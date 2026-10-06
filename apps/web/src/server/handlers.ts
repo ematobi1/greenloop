@@ -357,3 +357,61 @@ export async function deleteMemory(request: Request, recordId: string, deps: Dep
   if (!response.ok) return relayError(response);
   return emptyResponse(204);
 }
+
+const PLAN_ID = /^plan-[0-9a-f]{32}$/;
+const MAX_GOAL_CHARS = 2000;
+// Drafting answers only when the model is done; the orchestrator's own AI timeout is 120 s.
+export const PLAN_TIMEOUT_MS = 150_000;
+
+// Drafts a plan (stored as a draft; nothing runs). Only goal and conversation_id pass through.
+export async function draftPlan(request: Request, deps: Deps): Promise<Response> {
+  const rejected = guarded(request, deps, true);
+  if (rejected) return rejected;
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  const body = await readJsonBody(request, SMALL_BODY_BYTES);
+  if (body === BODY_TOO_LARGE) return tooLarge();
+  const fields = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const { goal, conversation_id: conversationId } = fields;
+  if (typeof goal !== "string" || !goal.trim() || goal.length > MAX_GOAL_CHARS) {
+    return validationFailed("goal", `Describe the goal in 1 to ${MAX_GOAL_CHARS} characters.`);
+  }
+  if (conversationId !== undefined && (typeof conversationId !== "string" || !CONVERSATION_ID.test(conversationId))) {
+    return badConversationId();
+  }
+  return forwardJson(
+    deps,
+    {
+      method: "POST",
+      path: "/v1/plans",
+      token,
+      body: conversationId === undefined ? { goal } : { goal, conversation_id: conversationId },
+      signal: request.signal,
+      timeoutMs: PLAN_TIMEOUT_MS,
+    },
+    201,
+  );
+}
+
+export async function listPlans(request: Request, deps: Deps): Promise<Response> {
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  return forwardJson(deps, { method: "GET", path: `/v1/plans?limit=${PAGE_SIZE}`, token, signal: request.signal }, 200);
+}
+
+export async function discardPlan(request: Request, planId: string, deps: Deps): Promise<Response> {
+  const rejected = guarded(request, deps, false);
+  if (rejected) return rejected;
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  if (!PLAN_ID.test(planId)) return errorResponse(404, "PLAN_NOT_FOUND", "That plan doesn't exist.");
+  let response: Response;
+  try {
+    response = await callOrchestrator(deps, { method: "DELETE", path: `/v1/plans/${planId}`, token, signal: request.signal });
+  } catch (error) {
+    if (error instanceof UpstreamFailure) return error.response;
+    throw error;
+  }
+  if (!response.ok) return relayError(response);
+  return emptyResponse(204);
+}
