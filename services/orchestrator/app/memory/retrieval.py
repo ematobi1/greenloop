@@ -12,12 +12,14 @@ context_builder.build_memory_context.
 
 from datetime import UTC, datetime
 
-from sqlalchemy import exists, select
+from sqlalchemy import exists, select, text
 from sqlalchemy.orm import Session, aliased
 
 from app.db.models import MemoryEmbeddingRow, MemoryRecordRow
 from app.memory.store import MemoryStore
 from greenloop_contracts import MemoryOperation, MemoryRecord
+
+EF_SEARCH = 400
 
 
 def semantic(
@@ -25,6 +27,10 @@ def semantic(
 ) -> list[MemoryRecord]:
     successor = aliased(MemoryRecordRow)
     now = datetime.now(UTC)
+    if session.get_bind().dialect.name == "postgresql":
+        # HNSW returns ef_search candidates across all principals before the filters run;
+        # the default (40) can leave a principal with few or no semantic hits.
+        session.execute(text(f"SET LOCAL hnsw.ef_search = {EF_SEARCH}"))
     rows = session.scalars(
         select(MemoryRecordRow)
         .join(

@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from app.core import accounts, tokens
 from app.core.config import get_settings
-from app.db.models import PrincipalRole
+from app.db.models import PrincipalRole, PrincipalRow
 from app.db.session import make_engine, make_session_factory
 from app.memory import indexing
 from app.memory.embeddings import Embedder, build_embedder
@@ -77,6 +77,8 @@ def _parser() -> argparse.ArgumentParser:
     password.add_argument("principal_id", type=_identifier_arg)
     sessions = commands.add_parser("revoke-sessions", help="Sign a user out everywhere.")
     sessions.add_argument("principal_id", type=_identifier_arg)
+    unlock = commands.add_parser("unlock-user", help="Lift a sign-in lockout on a username.")
+    unlock.add_argument("username")
     commands.add_parser(
         "embed-memory", help="Add embeddings to live memory records that have none (ADR 0011)."
     )
@@ -91,7 +93,7 @@ def run(
     args = _parser().parse_args(argv)
     if args.command == "embed-memory":
         return _embed_memory(session_factory, embedder)
-    if args.command in {"create-user", "set-password", "revoke-sessions"}:
+    if args.command in {"create-user", "set-password", "revoke-sessions", "unlock-user"}:
         return _accounts(args, session_factory)
     with session_factory() as session:
         try:
@@ -138,7 +140,12 @@ def _accounts(args: argparse.Namespace, session_factory: Callable[[], Session]) 
             elif args.command == "set-password":
                 revoked = accounts.set_password(session, args.principal_id, read_new_password())
                 message = f"Password changed; {revoked} sessions signed out."
+            elif args.command == "unlock-user":
+                unlocked = accounts.unlock_user(session, args.username)
+                message = "Unlocked." if unlocked else "That username was not locked."
             else:
+                if session.get(PrincipalRow, args.principal_id) is None:
+                    raise accounts.AccountError("No such principal.")
                 revoked = accounts.revoke_all_sessions(
                     session, args.principal_id, actor="admin-cli"
                 )

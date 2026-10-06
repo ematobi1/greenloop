@@ -75,7 +75,7 @@ class OllamaEmbedder:
         base_url: str,
         model: str,
         *,
-        timeout_seconds: float = 30.0,
+        timeout_seconds: float = 10.0,
         transport: httpx2.AsyncBaseTransport | None = None,
     ) -> None:
         self.model = model

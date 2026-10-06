@@ -62,6 +62,11 @@ def _successor(
     )
 
 
+def _carried(original: MemoryRecord, source_ref: str | None) -> str | None:
+    """A revision keeps where the memory came from unless the caller names a new source."""
+    return source_ref if source_ref is not None else original.provenance.source_ref
+
+
 def supersede(
     original: MemoryRecord,
     new_content: str,
@@ -81,7 +86,7 @@ def supersede(
         confidence=confidence,
         actor_id=actor_id,
         source=source,
-        source_ref=source_ref,
+        source_ref=_carried(original, source_ref),
         category=category,
         tags=tags,
         expires_at=expires_at,
@@ -103,7 +108,7 @@ def correct(
         confidence=MemoryConfidence.CORRECTED,
         actor_id=actor_id,
         source=source,
-        source_ref=source_ref,
+        source_ref=_carried(original, source_ref),
         category=None,
         tags=None,
         expires_at=_UNSET,

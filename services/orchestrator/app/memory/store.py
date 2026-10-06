@@ -122,6 +122,18 @@ class MemoryStore:
         )
         return [row.to_contract() for row in rows], total or 0
 
+    def lock_source_ref(self, principal_id: str, source_ref: str) -> None:
+        """Serialize writers for one (principal, source_ref) until this transaction ends, so
+        two concurrent "remember" calls can't both pass the duplicate check. Postgres only;
+        a no-op elsewhere."""
+        if self._session.get_bind().dialect.name != "postgresql":
+            return
+        self._session.execute(
+            select(
+                func.pg_advisory_xact_lock(func.hashtextextended(f"{principal_id}|{source_ref}", 0))
+            )
+        )
+
     def live_by_source_ref(self, principal_id: str, source_ref: str) -> MemoryRecord | None:
         """The principal's live record whose latest version cites `source_ref`, if any."""
         row = self._session.scalars(

@@ -196,3 +196,16 @@ def test_plans_are_listed_read_and_discarded_by_their_owner_only(
     assert client.delete(f"/v1/plans/{plan_id}", headers=auth).status_code == 204
     assert client.delete(f"/v1/plans/{plan_id}", headers=auth).status_code == 204
     assert client.get(f"/v1/plans/{plan_id}", headers=auth).json()["status"] == "discarded"
+
+
+def test_one_draft_at_a_time_per_principal(client, auth, use_provider):
+    provider = use_provider(FakeProvider([_json(GOOD)]))
+    client.app.state.plans_drafting.add("user-1")
+    busy = client.post("/v1/plans", headers=auth, json={"goal": "x"})
+    assert (busy.status_code, busy.json()["error"]["code"]) == (409, "PLAN_DRAFT_BUSY")
+    assert provider.requests == []
+    client.app.state.plans_drafting.clear()
+    assert client.post("/v1/plans", headers=auth, json={"goal": "x"}).status_code == 201
+    use_provider(FakeProvider(["not json"]))
+    assert client.post("/v1/plans", headers=auth, json={"goal": "x"}).status_code == 502
+    assert client.app.state.plans_drafting == set()

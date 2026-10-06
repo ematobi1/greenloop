@@ -3,6 +3,7 @@ embedded, the chat engine hands its query vector and model to retrieval, and the
 backfill refuses to run without an embedder."""
 
 import asyncio
+import time
 
 import pytest
 from sqlalchemy import select
@@ -18,6 +19,7 @@ from app.core.redaction import Redactor
 from app.db.models import MemoryEmbeddingRow, PrincipalRow
 from app.memory import indexing, provenance
 from app.memory.embeddings import EmbeddingError, FakeEmbedder
+from app.memory.store import MemoryStore
 
 
 class DownEmbedder:
@@ -31,26 +33,51 @@ def _embeddings(session):
     return session.scalars(select(MemoryEmbeddingRow)).all()
 
 
-def test_a_record_is_embedded_into_the_same_session(session_factory, make_record):
-    record = make_record("Prefers tea.")
+def _committed(session_factory, record):
     with session_factory() as session:
-        assert indexing.index_record(session, FakeEmbedder(), record) is True
+        session.add(PrincipalRow(principal_id=record.principal_id, display_name="User"))
+        MemoryStore(session, "req-1").create(record)
+        session.commit()
+    return record
+
+
+def test_a_committed_record_gets_its_vector_in_a_new_transaction(session_factory, make_record):
+    record = _committed(session_factory, make_record("Prefers tea."))
+    with session_factory() as session:
+        assert indexing.index_committed(session, FakeEmbedder(), record) is True
+        assert not session.in_transaction()
+    with session_factory() as session:
         [row] = _embeddings(session)
     assert (row.record_id, row.model) == (record.record_id, FakeEmbedder.model)
 
 
 def test_no_embedder_or_a_failing_one_embeds_nothing(session_factory, make_record):
+    record = _committed(session_factory, make_record())
     with session_factory() as session:
-        assert indexing.index_record(session, None, make_record()) is False
-        assert indexing.index_record(session, DownEmbedder(), make_record()) is False
+        assert indexing.index_committed(session, None, record) is False
+        assert indexing.index_committed(session, DownEmbedder(), record) is False
         assert _embeddings(session) == []
 
 
 def test_tombstones_and_empty_records_are_not_embedded(session_factory, make_record):
     tombstone = provenance.tombstone(make_record(), "user-1")
     with session_factory() as session:
-        assert indexing.index_record(session, FakeEmbedder(), tombstone) is False
+        assert indexing.index_committed(session, FakeEmbedder(), tombstone) is False
         assert _embeddings(session) == []
+
+
+class SlowEmbedder:
+    model = "slow"
+
+    async def embed(self, texts):
+        await asyncio.sleep(5)
+        return [[0.0]]
+
+
+def test_a_slow_query_embedding_falls_back_to_recency_quickly():
+    started = time.monotonic()
+    assert asyncio.run(indexing.embed_query(SlowEmbedder(), "x", timeout_seconds=0.05)) is None
+    assert time.monotonic() - started < 2
 
 
 def test_sync_embedding_works_outside_an_event_loop():

@@ -27,7 +27,7 @@ from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError
 from app.db.session import get_session
 from app.memory import provenance
-from app.memory.indexing import index_record
+from app.memory.indexing import index_committed
 from app.memory.store import (
     MemoryConflictError,
     MemoryNotFoundError,
@@ -180,8 +180,8 @@ def create_memory_record(
             "Shared memory is not available yet. Use scope 'private'.",
             fields={"scope": "Shared scope is disabled until a sharing policy exists."},
         ) from None
-    index_record(session, request.app.state.embedder, record)
     session.commit()
+    index_committed(session, request.app.state.embedder, record)
     return record
 
 
@@ -250,8 +250,8 @@ def create_memory_revision(
         raise _conflict() from None
     except ValidationError as err:
         raise _invalid(err) from None
-    index_record(session, request.app.state.embedder, revision)
     session.commit()
+    index_committed(session, request.app.state.embedder, revision)
     return revision
 
 

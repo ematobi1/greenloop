@@ -38,7 +38,7 @@ from app.core.errors import ApiError, error_body
 from app.db.models import MessageRow, MessageStatus
 from app.db.session import get_session
 from app.memory import provenance
-from app.memory.indexing import index_record
+from app.memory.indexing import index_committed
 from app.memory.store import MemoryStore
 from greenloop_contracts import (
     MemoryCategory,
@@ -352,6 +352,7 @@ def remember_message(
         )
     source_ref = f"conversation:{conversation_id}/message:{message_id}"
     memory = MemoryStore(session, request.state.correlation_id)
+    memory.lock_source_ref(principal.principal_id, source_ref)
     if memory.live_by_source_ref(principal.principal_id, source_ref) is not None:
         raise ApiError(409, "ALREADY_REMEMBERED", "This message is already saved as memory.")
     record = MemoryRecord(
@@ -361,7 +362,9 @@ def remember_message(
         category=body.category,
         content=content,
         provenance=Provenance(
-            source=MemorySource.USER,
+            # The user chose to keep it, but a reply was written by the model: never let
+            # model output pass as something the user said.
+            source=MemorySource.USER if message.role == "user" else MemorySource.AGENT,
             source_ref=source_ref,
             created_by=principal.principal_id,
             operation=MemoryOperation.CREATE,
@@ -369,6 +372,6 @@ def remember_message(
         created_at=datetime.now(UTC),
     )
     memory.create(record)
-    index_record(session, request.app.state.embedder, record)
     session.commit()
+    index_committed(session, request.app.state.embedder, record)
     return record

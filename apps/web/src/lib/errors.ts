@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   MESSAGE_INCOMPLETE: "Only a complete message can be saved to memory.",
   MESSAGE_NOT_FOUND: "That message no longer exists.",
   PLAN_DRAFT_INVALID: "The model didn't return a usable plan. Try again, or rephrase the goal.",
+  PLAN_DRAFT_BUSY: "A plan is already being drafted. Wait for it to finish.",
   PLAN_NOT_FOUND: "That plan no longer exists.",
   MEMORY_RECORD_NOT_FOUND: "That memory no longer exists. Refresh the list.",
   MEMORY_RECORD_CONFLICT: "This memory changed since you opened it. Refresh, then edit the latest version.",

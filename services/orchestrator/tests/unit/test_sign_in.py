@@ -182,10 +182,22 @@ def test_changing_the_password_signs_out_everywhere(client, session_factory, use
     assert _sign_in(client, password="a brand new password").status_code == 201
 
 
-def test_the_global_limiter_slows_spraying(client, user):
+def test_a_flood_of_failures_is_throttled_but_never_locks_out_valid_users(client, user):
     client.app.state.sign_in_limiter = SignInLimiter(limit=3, window=60)
-    statuses = [_sign_in(client, username=f"user{i}x").status_code for i in range(4)]
-    assert statuses == [401, 401, 401, 429]
+    statuses = [_sign_in(client, username=f"user{i}x").status_code for i in range(5)]
+    assert statuses == [401, 401, 401, 429, 429]
+    assert _sign_in(client).status_code == 201
+
+
+def test_verifications_are_capped(client, user):
+    limiter = SignInLimiter(concurrency=1)
+    client.app.state.sign_in_limiter = limiter
+    assert limiter.verifications.acquire(blocking=False)
+    try:
+        assert not limiter.verifications.acquire(blocking=False)
+    finally:
+        limiter.verifications.release()
+    assert _sign_in(client).status_code == 201
 
 
 def test_outdated_hashes_are_upgraded_on_sign_in(client, session_factory, user):
@@ -240,3 +252,34 @@ def test_cli_prompts_twice_and_refuses_a_mismatch(monkeypatch):
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: next(answers))
     with pytest.raises(accounts.AccountError, match="don't match"):
         cli.read_new_password()
+
+
+def test_cli_unlocks_a_locked_username(client, session_factory, user, capsys):
+    for _ in range(accounts.MAX_FAILURES):
+        _sign_in(client, password="wrong password!!")
+    assert _sign_in(client).status_code == 429
+    assert cli.run(["unlock-user", "ALICE"], session_factory) == 0
+    assert "Unlocked." in capsys.readouterr().out
+    assert _sign_in(client).status_code == 201
+    assert cli.run(["unlock-user", "alice"], session_factory) == 0
+    assert "not locked" in capsys.readouterr().out
+
+
+def test_cli_revoke_sessions_refuses_an_unknown_principal(session_factory, capsys):
+    assert cli.run(["revoke-sessions", "ghost"], session_factory) == 1
+    assert "No such principal" in capsys.readouterr().err
+
+
+def test_stale_throttle_rows_are_pruned_on_a_successful_sign_in(client, session_factory, user):
+    with session_factory() as session:
+        session.add(LoginThrottleRow(username="old-name", failures=0))
+        session.add(LoginThrottleRow(username="still-failing", failures=2))
+        session.commit()
+        for row in session.scalars(select(LoginThrottleRow)):
+            row.updated_at = datetime.now(UTC) - timedelta(days=2)
+        session.commit()
+    assert _sign_in(client).status_code == 201
+    with session_factory() as session:
+        names = set(session.scalars(select(LoginThrottleRow.username)))
+    assert "old-name" not in names
+    assert "still-failing" in names

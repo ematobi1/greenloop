@@ -519,3 +519,11 @@ test("discarding a plan is a guarded DELETE on a real plan id", async () => {
   assert.equal((await discardPlan(request("/api/plans/x", { method: "DELETE", origin: "http://evil.example" }), PLAN, deps)).status, 403);
   assert.equal(calls.length, 1);
 });
+
+test("execution memories written by dispatches can be managed too", async () => {
+  const EXEC = `mem-exec-${"f".repeat(32)}`;
+  const { calls, deps } = upstream(new Response(null, { status: 204 }));
+  assert.equal((await deleteMemory(request("/api/memory/x", { method: "DELETE" }), EXEC, deps)).status, 204);
+  assert.equal(calls[0].url, `http://orchestrator:8000/v1/memory-records/${EXEC}`);
+  assert.equal((await deleteMemory(request("/api/memory/x", { method: "DELETE" }), "mem-other-1", deps)).status, 404);
+});

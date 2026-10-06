@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from tests.integration.pg import TEST_DATABASE_URL
 
 from app.core import tokens
@@ -32,9 +32,9 @@ def _store(session_factory, make_record, principal_id, content, *, embed=True, e
         record = record.model_validate(record.model_dump() | {"expires_at": expires_at})
     with session_factory() as session:
         MemoryStore(session, "it").create(record)
-        if embed:
-            indexing.index_record(session, EMBEDDER, record)
         session.commit()
+        if embed:
+            indexing.index_committed(session, EMBEDDER, record)
     return record
 
 
@@ -78,9 +78,9 @@ def test_other_principals_superseded_deleted_and_expired_never_return(
         newer = store.revise(
             owner, old.record_id, lambda r: provenance.supersede(r, "My dog is called Rex.", owner)
         )
-        indexing.index_record(session, EMBEDDER, newer)
         store.delete(owner, gone.record_id, owner)
         session.commit()
+        indexing.index_committed(session, EMBEDDER, newer)
     asyncio.run(asyncio.sleep(1.1))
 
     ids = {record.record_id for record in _retrieve(pg_session_factory, owner, "dog called", 10)}
@@ -198,3 +198,62 @@ def test_a_tombstone_never_ranks_even_with_a_stray_vector(
             session, principal_id, FakeEmbedder.vector("my cat is called"), EMBEDDER.model, limit=5
         )
     assert tombstone.record_id not in {r.record_id for r in ranked}
+
+
+def test_concurrent_remembers_of_one_message_store_one_record(pg_session_factory, principal_id):
+    import threading
+
+    from app.memory import provenance as prov
+    from greenloop_contracts import MemoryRecord
+
+    source_ref = f"conversation:conv-{uuid.uuid4().hex}/message:msg-{uuid.uuid4().hex}"
+    stored: list[str] = []
+    barrier = threading.Barrier(4)
+
+    def remember() -> None:
+        barrier.wait()
+        with pg_session_factory() as session:
+            store = MemoryStore(session, "it")
+            store.lock_source_ref(principal_id, source_ref)
+            if store.live_by_source_ref(principal_id, source_ref) is None:
+                record = MemoryRecord.model_validate(
+                    {
+                        "record_id": prov.new_record_id(),
+                        "principal_id": principal_id,
+                        "scope": "private",
+                        "category": "user_context",
+                        "content": "once",
+                        "provenance": {
+                            "source": "user",
+                            "source_ref": source_ref,
+                            "created_by": principal_id,
+                        },
+                        "created_at": datetime.now(UTC),
+                    }
+                )
+                store.create(record)
+                stored.append(record.record_id)
+            session.commit()
+
+    threads = [threading.Thread(target=remember) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert len(stored) == 1
+
+
+def test_other_principals_nearby_vectors_do_not_starve_semantic_hits(
+    pg_session_factory, make_record, new_principal
+):
+    owner, crowd = new_principal(), new_principal()
+    for index in range(80):
+        _store(pg_session_factory, make_record, crowd, f"my dog is called Max number {index}")
+    mine = _store(pg_session_factory, make_record, owner, "the dog I have is called Rex")
+    with pg_session_factory() as session:
+        # A table this small is otherwise read with a sequential scan, never the HNSW index.
+        session.execute(text("SET LOCAL enable_seqscan = off"))
+        ranked = retrieval.semantic(
+            session, owner, FakeEmbedder.vector("my dog is called"), EMBEDDER.model, limit=5
+        )
+    assert [record.record_id for record in ranked] == [mine.record_id]

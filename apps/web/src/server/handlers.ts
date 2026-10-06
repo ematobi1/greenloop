@@ -253,7 +253,9 @@ export async function rememberMessage(
   );
 }
 
-const MEMORY_ID = /^mem-[0-9a-f]{32}$/;
+// User records are mem-<32 hex>; execution records written by dispatches are mem-exec-<32 hex>
+// (services/orchestrator/app/memory/execution.py).
+const MEMORY_ID = /^mem-(?:exec-)?[0-9a-f]{32}$/;
 const MAX_QUERY_CHARS = 200;
 const MAX_MEMORY_CHARS = 20_000;
 const MEMORY_CATEGORIES = new Set([

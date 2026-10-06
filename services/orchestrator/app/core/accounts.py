@@ -23,7 +23,7 @@ from functools import lru_cache
 
 from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerificationError
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -35,6 +35,7 @@ SESSION_PREFIX = "gls_"
 SESSION_LIFETIME = timedelta(hours=12)
 MAX_FAILURES = 5
 LOCKOUT = timedelta(minutes=15)
+STALE_THROTTLE = timedelta(days=1)
 PASSWORD_MIN_CHARS = 12
 PASSWORD_MAX_CHARS = 256
 USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
@@ -135,6 +136,28 @@ def set_password(session: Session, principal_id: str, password: str) -> int:
     return revoked
 
 
+def unlock_user(session: Session, username: str) -> bool:
+    """Clear a username's lockout and failure count. Returns whether anything was locked."""
+    row = session.get(LoginThrottleRow, normalize_username(username))
+    if row is None or (row.failures == 0 and row.locked_until is None):
+        return False
+    row.failures = 0
+    row.locked_until = None
+    return True
+
+
+def prune_throttle(session: Session, older_than: timedelta = STALE_THROTTLE) -> int:
+    """Delete throttle rows with no failures and no active lock that haven't changed lately."""
+    now = datetime.now(UTC)
+    return session.execute(
+        delete(LoginThrottleRow).where(
+            LoginThrottleRow.failures == 0,
+            LoginThrottleRow.locked_until.is_(None) | (LoginThrottleRow.locked_until < now),
+            LoginThrottleRow.updated_at < now - older_than,
+        )
+    ).rowcount
+
+
 def _throttle(session: Session, username: str) -> LoginThrottleRow:
     """The throttle row for `username`, locked for this transaction (created if missing)."""
     query = select(LoginThrottleRow).where(LoginThrottleRow.username == username).with_for_update()
@@ -183,6 +206,7 @@ def sign_in(session: Session, username: str, password: str, correlation_id: str)
 
     throttle.failures = 0
     throttle.locked_until = None
+    prune_throttle(session)
     if _hasher.check_needs_rehash(credential.password_hash):
         credential.password_hash = _hasher.hash(password)
     token = SESSION_PREFIX + secrets.token_urlsafe(32)

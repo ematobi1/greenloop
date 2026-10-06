@@ -46,6 +46,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.provider_registry = build_registry(settings)
     app.state.embedder = build_embedder(settings)
     app.state.sign_in_limiter = SignInLimiter()
+    # One plan draft at a time per principal (each is a long, paid model call).
+    app.state.plans_drafting = set()
     app.state.agent_registry = build_agent_registry()
     app.state.broker_client = (
         BrokerClient(settings.broker_url, settings.broker_service_token.get_secret_value())

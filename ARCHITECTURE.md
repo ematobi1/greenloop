@@ -65,8 +65,9 @@ This document maps every folder to its role, owning component and roadmap phase.
                            (schema broker, role greenloop_broker). See docs/database-roles.md
 
   Chat today goes api/v1/chat -> ai/engine directly (conversations/ holds the
-  transcript and the one-turn-at-a-time lease); orchestration/reasoning and the
-  planner are still stubs and will sit in front of ai/engine when they land.
+  transcript and the one-turn-at-a-time lease). Plan drafting goes api/v1/plans ->
+  orchestration/planner -> provider (one tool-free call; plan_store keeps drafts).
+  orchestration/reasoning is still a stub.
   packages/contracts:      shared schemas imported by every Python service
   services/self-improvement: proposals + validation, execution disabled
 ```
@@ -75,10 +76,10 @@ This document maps every folder to its role, owning component and roadmap phase.
 
 1. **User** sends text, voice or a UI action to `apps/web`.
 2. **Web app** server routes (`apps/web/src/server`) call the orchestrator API (`api/v1`) over the compose network with the token from the user's httpOnly session cookie; the browser never calls the orchestrator directly ([ADR 0010](docs/adr/0010-web-proxies-with-cookie-session.md)).
-3. **Auth** (`core/auth.py`) resolves the principal. Every later step is scoped to that principal.
+3. **Auth** (`core/auth.py`) resolves the principal from an API token or a web session token (`core/accounts.py`: username and argon2id password sign-in, sessions, lockout; ADR 0012). Every later step is scoped to that principal.
 4. **Reasoning** (`orchestration/reasoning.py`) interprets the request.
-5. **Planning** (`orchestration/planner.py`) drafts a plan of steps as `Task` contracts.
-6. **Memory retrieval** (`memory/retrieval.py`) fetches relevant records. They pass through `memory/context_builder.py` before any prompt sees them.
+5. **Planning** (`orchestration/planner.py`, `orchestration/plan_store.py`) drafts a `Plan` of `PlanStep`s for the user to review; drafts never execute (ADR 0013). The workflow engine turns approved plans into `Task`s in phase 4.
+6. **Memory retrieval** (`memory/retrieval.py`) ranks the principal's live records by pgvector similarity to the request, then fills with recent ones (`memory/embeddings.py`, `memory/indexing.py`; ADR 0011). They pass through `memory/context_builder.py` before any prompt sees them.
 7. **Agent dispatch** (`orchestration/dispatcher.py`) runs a step on an agent as a `Dispatch`. Today only `POST /v1/dispatches` calls it; the planner will in phase 4.
 8. **Permission check** (`permissions/policy.py`) evaluates the requested `ToolPermission`.
 9. **Approval if needed** (`permissions/approvals.py`) asks the broker for an approval bound to the SHA256 of the exact operation; only the owning human user, outside any dispatch, can decide it (ADR 0009).

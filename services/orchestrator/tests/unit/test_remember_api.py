@@ -128,3 +128,24 @@ def test_remembering_is_audited_and_embedded(client, auth, turn, session_factory
             session.get(MemoryEmbeddingRow, (record["record_id"], FakeEmbedder.model)) is not None
         )
     assert actions == ["memory.create"]
+
+
+def test_a_corrected_memory_still_blocks_saving_the_message_again(client, auth, turn):
+    conversation_id, user_message_id, _ = turn
+    first = _remember(client, auth, conversation_id, user_message_id).json()
+    corrected = client.post(
+        f"/v1/memory-records/{first['record_id']}/revisions",
+        headers=auth,
+        json={"operation": "correct", "content": "I prefer jasmine tea."},
+    ).json()
+    assert corrected["provenance"]["source_ref"] == first["provenance"]["source_ref"]
+    again = _remember(client, auth, conversation_id, user_message_id)
+    assert (again.status_code, again.json()["error"]["code"]) == (409, "ALREADY_REMEMBERED")
+
+
+def test_a_saved_reply_is_marked_as_written_by_the_model(client, auth, turn):
+    conversation_id, user_message_id, reply_id = turn
+    reply = _remember(client, auth, conversation_id, reply_id).json()
+    mine = _remember(client, auth, conversation_id, user_message_id).json()
+    assert reply["provenance"]["source"] == "agent"
+    assert mine["provenance"]["source"] == "user"

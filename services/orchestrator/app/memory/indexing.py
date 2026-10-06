@@ -15,6 +15,8 @@ from greenloop_contracts import MemoryOperation, MemoryRecord
 
 logger = structlog.get_logger(__name__)
 
+QUERY_TIMEOUT_SECONDS = 3.0
+
 
 async def embed_texts(embedder: Embedder | None, texts: list[str]) -> list[list[float]] | None:
     if embedder is None or not texts:
@@ -36,8 +38,10 @@ def embed_texts_sync(embedder: Embedder | None, texts: list[str]) -> list[list[f
         return asyncio.run(embed_texts(embedder, texts))
 
 
-def index_record(session: Session, embedder: Embedder | None, record: MemoryRecord) -> bool:
-    """Embed one just-written record into the same session. Returns whether it was embedded."""
+def index_committed(session: Session, embedder: Embedder | None, record: MemoryRecord) -> bool:
+    """Embed a record that is already committed, then store the vector in its own short
+    transaction. The embedder is called with no transaction open, so a slow embedder never
+    holds a connection or locks. Returns whether the vector was stored."""
     if record.provenance.operation is MemoryOperation.DELETE or not record.content.strip():
         return False
     vectors = embed_texts_sync(embedder, [record.content])
@@ -46,7 +50,24 @@ def index_record(session: Session, embedder: Embedder | None, record: MemoryReco
     session.add(
         MemoryEmbeddingRow(record_id=record.record_id, model=embedder.model, embedding=vectors[0])
     )
+    session.commit()
     return True
+
+
+async def embed_query(
+    embedder: Embedder | None, text: str, timeout_seconds: float = QUERY_TIMEOUT_SECONDS
+) -> list[float] | None:
+    """The vector to rank memory against `text`, or None (recency only) on any failure or
+    after `timeout_seconds`, so a slow embedder never holds up a chat turn or a plan."""
+    if embedder is None:
+        return None
+    try:
+        async with asyncio.timeout(timeout_seconds):
+            vectors = await embed_texts(embedder, [text])
+    except TimeoutError:
+        logger.warning("memory_query_embedding_timed_out", model=embedder.model)
+        return None
+    return vectors[0] if vectors else None
 
 
 def unembedded_live_records(session: Session, model: str, limit: int) -> list[MemoryRecordRow]:

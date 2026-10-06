@@ -1,9 +1,10 @@
 """Web sign-in sessions (ADR 0012).
 
 POST /v1/sessions is the only unauthenticated write route. Wrong usernames and wrong
-passwords get the same 401; a username locked after repeated failures, or the whole
-endpoint while it is being hammered, gets 429 with Retry-After. The session token is
-returned once, to the web server, which keeps it in an httpOnly cookie.
+passwords get the same 401. A locked username, and failed attempts while the endpoint
+is being flooded, get 429 with Retry-After; correct credentials for an unlocked
+username always work. The session token is returned once, to the web server, which
+keeps it in an httpOnly cookie.
 """
 
 import threading
@@ -24,29 +25,42 @@ from app.db.session import get_session
 router = APIRouter(prefix="/sessions", tags=["sessions"])
 DbSession = Annotated[Session, Depends(get_session)]
 
-GLOBAL_LIMIT = 30
+GLOBAL_FAILURE_LIMIT = 30
 GLOBAL_WINDOW_SECONDS = 60.0
+MAX_CONCURRENT_VERIFICATIONS = 4
 
 
 class SignInLimiter:
-    """At most `limit` sign-in attempts per `window` seconds in this process, to slow
-    password spraying across many usernames (per-username lockout is in the database)."""
+    """Process-wide sign-in guard (ADR 0012).
 
-    def __init__(self, limit: int = GLOBAL_LIMIT, window: float = GLOBAL_WINDOW_SECONDS) -> None:
+    - At most MAX_CONCURRENT_VERIFICATIONS argon2 checks run at once, which bounds the
+      CPU an unauthenticated flood can use.
+    - Failures are counted per window. Past the limit, further failures get 429 instead
+      of 401, but every attempt is still verified, so correct credentials always work:
+      a flood of bad attempts can't lock everyone out. Per-username lockout is separate.
+    """
+
+    def __init__(
+        self,
+        limit: int = GLOBAL_FAILURE_LIMIT,
+        window: float = GLOBAL_WINDOW_SECONDS,
+        concurrency: int = MAX_CONCURRENT_VERIFICATIONS,
+    ) -> None:
         self._limit = limit
         self._window = window
-        self._attempts: deque[float] = deque()
+        self._failures: deque[float] = deque()
         self._lock = threading.Lock()
+        self.verifications = threading.BoundedSemaphore(concurrency)
 
-    def acquire(self) -> int | None:
-        """None if allowed, else seconds to wait."""
+    def record_failure(self) -> int | None:
+        """Count a failure. None if under the limit, else seconds until the window clears."""
         now = time.monotonic()
         with self._lock:
-            while self._attempts and self._attempts[0] <= now - self._window:
-                self._attempts.popleft()
-            if len(self._attempts) >= self._limit:
-                return int(self._attempts[0] + self._window - now) + 1
-            self._attempts.append(now)
+            while self._failures and self._failures[0] <= now - self._window:
+                self._failures.popleft()
+            self._failures.append(now)
+            if len(self._failures) > self._limit:
+                return int(self._failures[0] + self._window - now) + 1
             return None
 
 
@@ -83,17 +97,18 @@ def sign_in(
     session: DbSession,
     limiter: Annotated[SignInLimiter, Depends(get_limiter)],
 ) -> SessionOut:
-    if (wait := limiter.acquire()) is not None:
-        raise _throttled(wait)
     try:
-        signed_in = accounts.sign_in(
-            session, body.username, body.password, request.state.correlation_id
-        )
+        with limiter.verifications:
+            signed_in = accounts.sign_in(
+                session, body.username, body.password, request.state.correlation_id
+            )
     except accounts.LoginThrottledError as err:
         session.commit()
         raise _throttled(err.retry_after) from None
     except accounts.InvalidCredentialsError:
         session.commit()
+        if (wait := limiter.record_failure()) is not None:
+            raise _throttled(wait) from None
         raise ApiError(401, "INVALID_CREDENTIALS", "Wrong username or password.") from None
     session.commit()
     return SessionOut(

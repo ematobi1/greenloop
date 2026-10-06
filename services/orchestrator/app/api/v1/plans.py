@@ -20,7 +20,7 @@ from app.core.auth import CurrentPrincipal, Principal
 from app.core.errors import ApiError
 from app.db.session import get_session
 from app.memory import retrieval
-from app.memory.indexing import embed_texts
+from app.memory.indexing import embed_query
 from app.orchestration import planner
 from app.orchestration.plan_store import PlanNotFoundError, PlanStore
 from greenloop_contracts import Plan
@@ -65,26 +65,35 @@ async def create_plan(body: PlanCreate, request: Request, principal: CurrentPrin
         provider = state.provider_registry.get(None)
     except AiError as err:
         raise err.to_api_error() from None
-    vectors = await embed_texts(state.embedder, [body.goal])
-    try:
-        model_request = await asyncio.to_thread(
-            _prepare, request, principal, body, vectors[0] if vectors else None
-        )
-    except ConversationNotFoundError:
-        raise ApiError(404, "CONVERSATION_NOT_FOUND", "Conversation not found.") from None
-    try:
-        async with asyncio.timeout(state.settings.ai_timeout_seconds):
-            reply = await planner.generate(provider, model_request)
-        steps = planner.parse_plan_steps(reply)
-    except TimeoutError:
-        raise AiError("timeout").to_api_error() from None
-    except AiError as err:
-        raise err.to_api_error() from None
-    except planner.PlanDraftError:
+    drafting: set[str] = state.plans_drafting
+    if principal.principal_id in drafting:
         raise ApiError(
-            502, "PLAN_DRAFT_INVALID", "The model did not return a usable plan. Try again."
-        ) from None
-    return await asyncio.to_thread(_store_plan, request, principal, body, steps)
+            409, "PLAN_DRAFT_BUSY", "A plan is already being drafted. Wait for it to finish."
+        )
+    drafting.add(principal.principal_id)
+    try:
+        query_vector = await embed_query(state.embedder, body.goal)
+        try:
+            model_request = await asyncio.to_thread(
+                _prepare, request, principal, body, query_vector
+            )
+        except ConversationNotFoundError:
+            raise ApiError(404, "CONVERSATION_NOT_FOUND", "Conversation not found.") from None
+        try:
+            async with asyncio.timeout(state.settings.ai_timeout_seconds):
+                reply = await planner.generate(provider, model_request)
+            steps = planner.parse_plan_steps(reply)
+        except TimeoutError:
+            raise AiError("timeout").to_api_error() from None
+        except AiError as err:
+            raise err.to_api_error() from None
+        except planner.PlanDraftError:
+            raise ApiError(
+                502, "PLAN_DRAFT_INVALID", "The model did not return a usable plan. Try again."
+            ) from None
+        return await asyncio.to_thread(_store_plan, request, principal, body, steps)
+    finally:
+        drafting.discard(principal.principal_id)
 
 
 def _prepare(request: Request, principal: Principal, body: PlanCreate, query_vector):

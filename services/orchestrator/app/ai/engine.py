@@ -41,7 +41,7 @@ from app.core.redaction import Redactor
 from app.db.models import MessageRole, MessageRow, MessageStatus
 from app.memory import retrieval
 from app.memory.embeddings import Embedder
-from app.memory.indexing import embed_texts
+from app.memory.indexing import embed_query
 from greenloop_contracts import AuditOutcome, AuditRecord
 
 logger = structlog.get_logger(__name__)
@@ -112,8 +112,7 @@ class ChatEngine:
 
     async def embed_query(self, content: str) -> list[float] | None:
         """The vector for ranking memory against this message, or None (recency only)."""
-        vectors = await embed_texts(self._embedder, [content])
-        return vectors[0] if vectors else None
+        return await embed_query(self._embedder, content)
 
     def prepare(
         self,
