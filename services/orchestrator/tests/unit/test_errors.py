@@ -33,6 +33,7 @@ BUILT_ROUTES = {
     ("DELETE", "/v1/conversations/x-1"),
     ("GET", "/v1/conversations/x-1/messages"),
     ("POST", "/v1/conversations/x-1/messages"),
+    ("POST", "/v1/conversations/x-1/messages/x-1/remember"),
     ("GET", "/v1/agents"),
     ("GET", "/v1/agents/x-1"),
     ("POST", "/v1/dispatches"),
@@ -45,7 +46,7 @@ UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
 
 
 def test_every_v1_route_is_covered():
-    assert len(V1_ROUTES) == 22
+    assert len(V1_ROUTES) == 23
     assert set(V1_ROUTES) >= BUILT_ROUTES
 
 

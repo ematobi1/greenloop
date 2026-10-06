@@ -15,6 +15,7 @@ export function startMockOrchestrator(port) {
   let nextId = 1;
   const conversations = [];
   const messages = new Map();
+  const remembered = new Set();
 
   const json = (response, status, body) => {
     response.writeHead(status, { "Content-Type": "application/json" });
@@ -27,7 +28,7 @@ export function startMockOrchestrator(port) {
   function message(conversationId, role, content, status = "complete") {
     const list = messages.get(conversationId);
     const row = {
-      message_id: `msg-${nextId++}`,
+      message_id: `msg-${String(nextId++).padStart(32, "0")}`,
       conversation_id: conversationId,
       sequence: list.length + 1,
       role,
@@ -97,6 +98,14 @@ export function startMockOrchestrator(port) {
     }
     if (url.pathname === "/v1/conversations" && request.method === "POST") {
       return json(response, 201, createConversation(data.title ?? "New conversation"));
+    }
+    const remember = /^\/v1\/conversations\/([^/]+)\/messages\/([^/]+)\/remember$/.exec(url.pathname);
+    if (remember && request.method === "POST") {
+      const found = messages.get(remember[1])?.find((row) => row.message_id === remember[2]);
+      if (!found) return fail(response, 404, "MESSAGE_NOT_FOUND", "Message not found.");
+      if (remembered.has(found.message_id)) return fail(response, 409, "ALREADY_REMEMBERED", "Already saved.");
+      remembered.add(found.message_id);
+      return json(response, 201, { record_id: `mem-${found.message_id}`, content: found.content });
     }
     const match = /^\/v1\/conversations\/([^/]+)\/messages$/.exec(url.pathname);
     if (match && messages.has(match[1])) {

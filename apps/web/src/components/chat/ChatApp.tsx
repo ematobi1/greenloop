@@ -29,6 +29,8 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [remembered, setRemembered] = useState<ReadonlySet<string>>(new Set());
   const abort = useRef<AbortController | null>(null);
 
   const fail = useCallback((failure: ApiFailure) => {
@@ -79,6 +81,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   function select(conversationId: string) {
     if (streaming !== null) return;
     setError(null);
+    setStatusNote(null);
     setMessages([]);
     setHidden(0);
     setActiveId(conversationId);
@@ -128,6 +131,22 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     } finally {
       setStreaming(null);
       abort.current = null;
+    }
+  }
+
+  async function remember(messageId: string) {
+    if (!activeId) return;
+    setError(null);
+    setStatusNote(null);
+    try {
+      await api.rememberMessage(activeId, messageId);
+      setRemembered((current) => new Set(current).add(messageId));
+      setStatusNote("Saved to memory.");
+    } catch (caught) {
+      if (caught instanceof api.ApiError && caught.failure.code === "ALREADY_REMEMBERED") {
+        setRemembered((current) => new Set(current).add(messageId));
+      }
+      handle(caught);
     }
   }
 
@@ -207,7 +226,19 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
                 <li key={message.key} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
                   <span className="message__role">{message.role === "user" ? "You" : "GreenLoop"}</span>
                   <p className="message__text">{message.content}</p>
-                  {message.incomplete && <span className="message__note">Reply incomplete</span>}
+                  {message.incomplete ? (
+                    <span className="message__note">Reply incomplete</span>
+                  ) : remembered.has(message.key) ? (
+                    <span className="message__note">Saved to memory</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button--quiet message__remember"
+                      onClick={() => void remember(message.key)}
+                    >
+                      Remember
+                    </button>
+                  )}
                 </li>
               ))}
               {streaming !== null && (
@@ -240,6 +271,9 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
         )}
         <p className="chat__error" role="alert">
           {error}
+        </p>
+        <p className="chat__notice" role="status">
+          {statusNote}
         </p>
       </section>
     </div>

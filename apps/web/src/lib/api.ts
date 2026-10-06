@@ -86,6 +86,12 @@ export async function listMessages(conversationId: string): Promise<{ messages: 
   return { messages: page.data, hidden: page.meta.offset };
 }
 
+// "Remember this": saves one message as private, unverified memory.
+export async function rememberMessage(conversationId: string, messageId: string): Promise<void> {
+  const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/remember`;
+  await send(path, { method: "POST", headers: JSON_HEADERS, body: "{}" });
+}
+
 export type StreamHandlers = {
   onUserMessage: (message: Message) => void;
   onDelta: (text: string) => void;

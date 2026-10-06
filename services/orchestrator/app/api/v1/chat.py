@@ -14,7 +14,7 @@ reply is discarded and the client gets CONVERSATION_NOT_FOUND (404, or an SSE
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
-from datetime import datetime
+from datetime import UTC, datetime
 from functools import partial
 from typing import Annotated
 
@@ -35,13 +35,25 @@ from app.conversations.store import (
 )
 from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError, error_body
-from app.db.models import MessageRow
+from app.db.models import MessageRow, MessageStatus
 from app.db.session import get_session
+from app.memory import provenance
+from app.memory.indexing import index_record
+from app.memory.store import MemoryStore
+from greenloop_contracts import (
+    MemoryCategory,
+    MemoryOperation,
+    MemoryRecord,
+    MemoryScope,
+    MemorySource,
+    Provenance,
+)
 
 router = APIRouter(prefix="/conversations", tags=["chat"])
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 ConversationId = Annotated[str, Path(max_length=128)]
+MessageId = Annotated[str, Path(max_length=128)]
 DbSession = Annotated[Session, Depends(get_session)]
 
 
@@ -88,6 +100,18 @@ class MessageOut(BaseModel):
     provider: str | None
     model: str | None
     created_at: datetime
+
+
+class RememberCreate(BaseModel):
+    """Save a chat message as memory. `content` lets the user keep only part of it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)]
+        | None
+    ) = None
+    category: MemoryCategory = MemoryCategory.USER_CONTEXT
 
 
 class ConversationPage(BaseModel):
@@ -295,3 +319,56 @@ async def _event_stream(engine: ChatEngine, turn: PreparedTurn) -> AsyncIterator
                 )
     finally:
         await events.aclose()
+
+
+@router.post("/{conversation_id}/messages/{message_id}/remember", status_code=201)
+def remember_message(
+    conversation_id: ConversationId,
+    message_id: MessageId,
+    body: RememberCreate,
+    request: Request,
+    principal: CurrentPrincipal,
+    store: Store,
+    session: DbSession,
+) -> MemoryRecord:
+    """Explicit "remember this": the user, not the model, decides what becomes memory.
+
+    The record is the principal's own, private, unverified, with provenance source=user
+    and source_ref pointing at the conversation and message it came from.
+    """
+    try:
+        message = store.message(conversation_id, message_id)
+    except ConversationNotFoundError:
+        raise ApiError(404, "MESSAGE_NOT_FOUND", "Message not found.") from None
+    if message.status != MessageStatus.COMPLETE.value:
+        raise ApiError(422, "MESSAGE_INCOMPLETE", "Only a complete message can be saved as memory.")
+    content = body.content or message.content.strip()
+    if not content or len(content) > 20000:
+        raise ApiError(
+            422,
+            "VALIDATION_FAILED",
+            "Request validation failed.",
+            fields={"content": "Choose 1 to 20000 characters to remember."},
+        )
+    source_ref = f"conversation:{conversation_id}/message:{message_id}"
+    memory = MemoryStore(session, request.state.correlation_id)
+    if memory.live_by_source_ref(principal.principal_id, source_ref) is not None:
+        raise ApiError(409, "ALREADY_REMEMBERED", "This message is already saved as memory.")
+    record = MemoryRecord(
+        record_id=provenance.new_record_id(),
+        principal_id=principal.principal_id,
+        scope=MemoryScope.PRIVATE,
+        category=body.category,
+        content=content,
+        provenance=Provenance(
+            source=MemorySource.USER,
+            source_ref=source_ref,
+            created_by=principal.principal_id,
+            operation=MemoryOperation.CREATE,
+        ),
+        created_at=datetime.now(UTC),
+    )
+    memory.create(record)
+    index_record(session, request.app.state.embedder, record)
+    session.commit()
+    return record

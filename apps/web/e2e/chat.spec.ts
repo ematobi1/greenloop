@@ -109,6 +109,20 @@ test("busy and not-configured errors show their own messages and keep the draft"
   await expect(alert).toContainText("No AI provider is configured");
 });
 
+test("a message can be saved to memory once", async ({ page }) => {
+  await signIn(page);
+  await page.getByRole("button", { name: "Start a conversation" }).click();
+  await page.getByLabel("Message", { exact: true }).fill("I prefer green tea");
+  await page.getByLabel("Message", { exact: true }).press("Enter");
+  await expect(page.locator('[aria-live="polite"]')).toHaveCount(0);
+  const userMessage = page.locator(".message--user");
+  await userMessage.getByRole("button", { name: "Remember" }).click();
+  await expect(page.locator(".chat__notice")).toHaveText("Saved to memory.");
+  await expect(userMessage.getByText("Saved to memory")).toBeVisible();
+  await expect(userMessage.getByRole("button", { name: "Remember" })).toHaveCount(0);
+  await expect(page.locator(".chat__error")).toHaveText("");
+});
+
 test("a long conversation opens on its latest messages", async ({ page, request }) => {
   await request.post(`http://127.0.0.1:${MOCK_PORT}/__seed-long`);
   await signIn(page);

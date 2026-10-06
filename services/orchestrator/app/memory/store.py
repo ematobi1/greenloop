@@ -122,6 +122,20 @@ class MemoryStore:
         )
         return [row.to_contract() for row in rows], total or 0
 
+    def live_by_source_ref(self, principal_id: str, source_ref: str) -> MemoryRecord | None:
+        """The principal's live record whose latest version cites `source_ref`, if any."""
+        row = self._session.scalars(
+            self._owned(principal_id)
+            .where(
+                MemoryRecordRow.source_ref == source_ref,
+                MemoryRecordRow.operation != MemoryOperation.DELETE.value,
+                _has_no_successor,
+                _not_expired(datetime.now(UTC)),
+            )
+            .limit(1)
+        ).one_or_none()
+        return row.to_contract() if row is not None else None
+
     def revise(
         self,
         principal_id: str,

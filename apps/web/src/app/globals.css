@@ -257,3 +257,14 @@ a {
     flex-shrink: 0;
   }
 }
+
+.message__remember {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.875rem;
+}
+
+.chat__notice {
+  min-height: 1.5em;
+  color: var(--muted);
+}

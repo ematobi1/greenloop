@@ -185,3 +185,34 @@ export async function sendMessage(request: Request, conversationId: string, deps
   }
   return new Response(response.body, { status: 200, headers: SSE_HEADERS });
 }
+
+const MESSAGE_ID = /^msg-[0-9a-f]{32}$/;
+
+// "Remember this": saves one message of the user's own conversation as memory.
+export async function rememberMessage(
+  request: Request,
+  conversationId: string,
+  messageId: string,
+  deps: Deps,
+): Promise<Response> {
+  const rejected = guarded(request, deps, true);
+  if (rejected) return rejected;
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  if (!CONVERSATION_ID.test(conversationId) || !MESSAGE_ID.test(messageId)) {
+    return errorResponse(404, "MESSAGE_NOT_FOUND", "That message doesn't exist.");
+  }
+  const body = await readJsonBody(request, SMALL_BODY_BYTES);
+  if (body === BODY_TOO_LARGE) return tooLarge();
+  return forwardJson(
+    deps,
+    {
+      method: "POST",
+      path: `/v1/conversations/${conversationId}/messages/${messageId}/remember`,
+      token,
+      body: {},
+      signal: request.signal,
+    },
+    201,
+  );
+}

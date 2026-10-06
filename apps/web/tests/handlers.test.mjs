@@ -6,6 +6,7 @@ import {
   listConversations,
   listMessages,
   PAGE_SIZE,
+  rememberMessage,
   sendMessage,
   signIn,
   signOut,
@@ -294,4 +295,37 @@ test("the SSE relay forbids caching and transformation", async () => {
     deps,
   );
   assert.equal(response.headers.get("cache-control"), "no-store, no-transform");
+});
+
+test("remembering a message forwards only the ids, never a body from the browser", async () => {
+  const MSG = `msg-${"c".repeat(32)}`;
+  const { calls, deps } = upstream(Response.json({ record_id: "mem-1" }, { status: 201 }));
+  const response = await rememberMessage(
+    request(`/api/conversations/${CONV}/messages/${MSG}/remember`, { method: "POST", body: { content: "x" } }),
+    CONV,
+    MSG,
+    deps,
+  );
+  assert.equal(response.status, 201);
+  assert.equal(calls[0].url, `http://orchestrator:8000/v1/conversations/${CONV}/messages/${MSG}/remember`);
+  assert.deepEqual(JSON.parse(calls[0].init.body), {});
+});
+
+test("remember refuses bad ids, cross-site requests and missing sessions without calling upstream", async () => {
+  const MSG = `msg-${"c".repeat(32)}`;
+  const { calls, deps } = upstream(new Response("{}"));
+  const path = "/api/conversations/x/messages/y/remember";
+  for (const [conversationId, messageId] of [[CONV, "msg-xyz"], ["conv-1", MSG], [CONV, "../.."]]) {
+    const response = await rememberMessage(request(path, { method: "POST", body: {} }), conversationId, messageId, deps);
+    assert.equal(response.status, 404);
+  }
+  assert.equal(
+    (await rememberMessage(request(path, { method: "POST", body: {}, origin: "http://evil.example" }), CONV, MSG, deps)).status,
+    403,
+  );
+  assert.equal(
+    (await rememberMessage(request(path, { method: "POST", body: {}, signedIn: false }), CONV, MSG, deps)).status,
+    401,
+  );
+  assert.equal(calls.length, 0);
 });

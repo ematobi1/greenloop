@@ -104,6 +104,19 @@ class ConversationStore:
         ).all()
         return list(rows), total or 0
 
+    def message(self, conversation_id: str, message_id: str) -> MessageRow:
+        """One message of an owned, live conversation; anything else is not found."""
+        self.get(conversation_id)
+        row = self._session.scalars(
+            select(MessageRow).where(
+                MessageRow.conversation_id == conversation_id,
+                MessageRow.message_id == message_id,
+            )
+        ).one_or_none()
+        if row is None:
+            raise ConversationNotFoundError(conversation_id)
+        return row
+
     def history(self, conversation_id: str, limit: int) -> list[MessageRow]:
         """The newest `limit` messages from answered turns, oldest first.
 
