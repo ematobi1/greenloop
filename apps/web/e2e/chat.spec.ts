@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { expect, test, type Page } from "@playwright/test";
 
-import { E2E_TOKEN } from "./mock-orchestrator.mjs";
+import { E2E_PASSWORD, E2E_TOKEN, E2E_USERNAME } from "./mock-orchestrator.mjs";
 import { MOCK_PORT, SERVER_LOG, WEB_ORIGIN } from "./ports.mjs";
 
 const COOKIE = "__Host-greenloop_session";
@@ -11,7 +11,7 @@ const COOKIE = "__Host-greenloop_session";
 function watchForToken(page: Page): string[] {
   const leaks: string[] = [];
   page.on("response", async (response) => {
-    const headers = await response.allHeaders();
+    const headers = await response.allHeaders().catch(() => ({}) as Record<string, string>);
     for (const [name, value] of Object.entries(headers)) {
       if (name === "set-cookie") continue;
       if (value.includes(E2E_TOKEN)) leaks.push(`${response.url()} header ${name}`);
@@ -22,18 +22,32 @@ function watchForToken(page: Page): string[] {
   return leaks;
 }
 
-async function signIn(page: Page, token = E2E_TOKEN) {
+async function signIn(page: Page, username = E2E_USERNAME, password = E2E_PASSWORD) {
   await page.goto("/chat");
-  await page.getByLabel("GreenLoop API token").fill(token);
+  await page.getByLabel("Username").fill(username);
+  await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
 }
 
 test.describe.configure({ mode: "serial" });
 
-test("a wrong token is refused and sets no cookie", async ({ page, context }) => {
-  await signIn(page, "glp_not-the-right-token");
-  await expect(page.locator(".sign-in__error")).toHaveText("That token isn't valid. Check it and try again.");
+test("a wrong password is refused, clears the field and sets no cookie", async ({ page, context }) => {
+  await signIn(page, E2E_USERNAME, "not the password");
+  await expect(page.locator(".sign-in__error")).toHaveText("Wrong username or password.");
+  await expect(page.getByLabel("Password")).toHaveValue("");
   expect(await context.cookies()).toEqual([]);
+});
+
+test("a locked username is told to wait", async ({ page, context }) => {
+  await signIn(page, "locked", "anything at all");
+  await expect(page.locator(".sign-in__error")).toContainText("Too many sign-in attempts");
+  expect(await context.cookies()).toEqual([]);
+});
+
+test("the sign-in form never offers token paste", async ({ page }) => {
+  await page.goto("/chat");
+  await expect(page.getByText(/API token/i)).toHaveCount(0);
+  await expect(page.getByLabel("Password")).toHaveAttribute("autocomplete", "current-password");
 });
 
 test("signing in sets a locked-down cookie that page scripts can't read", async ({ page, context }) => {
@@ -42,7 +56,9 @@ test("signing in sets a locked-down cookie that page scripts can't read", async 
   await expect(page.getByRole("button", { name: "Start a conversation" })).toBeVisible();
 
   const [cookie] = (await context.cookies()).filter((item) => item.name === COOKIE);
-  expect(cookie).toMatchObject({ value: E2E_TOKEN, httpOnly: true, secure: true, sameSite: "Strict", path: "/" });
+  expect(cookie).toMatchObject({ httpOnly: true, secure: true, sameSite: "Strict", path: "/" });
+  expect(cookie.value.startsWith(E2E_TOKEN)).toBe(true);
+  expect(await page.content()).not.toContain(E2E_PASSWORD);
   const lifetime = cookie.expires - Date.now() / 1000;
   expect(lifetime).toBeGreaterThan(12 * 3600 - 120);
   expect(lifetime).toBeLessThanOrEqual(12 * 3600);
@@ -150,12 +166,12 @@ test("security headers are on pages and API routes", async ({ request }) => {
 test("cross-site and form-encoded writes are refused", async ({ request }) => {
   const forged = await request.post("/api/session", {
     headers: { Origin: "http://evil.example", "Content-Type": "application/json" },
-    data: { token: E2E_TOKEN },
+    data: { username: E2E_USERNAME, password: E2E_PASSWORD },
   });
   expect(forged.status()).toBe(403);
   const form = await request.post("/api/session", {
     headers: { Origin: WEB_ORIGIN },
-    form: { token: E2E_TOKEN },
+    form: { username: E2E_USERNAME, password: E2E_PASSWORD },
   });
   expect(form.status()).toBe(415);
   expect(forged.headers()["set-cookie"]).toBeUndefined();
@@ -163,17 +179,32 @@ test("cross-site and form-encoded writes are refused", async ({ request }) => {
 
 test("sign-out clears the cookie and returns to sign-in", async ({ page, context }) => {
   await signIn(page);
-  await page.getByRole("button", { name: "Sign out" }).click();
+  await page.getByRole("button", { name: "Sign out", exact: true }).click();
   await expect(page.locator(".sign-in__error")).toHaveText("You're signed out.");
   expect((await context.cookies()).filter((item) => item.name === COOKIE)).toEqual([]);
 });
 
-// Runs last: it revokes the token on the mock for the rest of the run.
+test("sign out everywhere ends the other browser's session too", async ({ page, context, browser }) => {
+  await signIn(page);
+  const other = await browser.newContext();
+  const otherPage = await other.newPage();
+  await signIn(otherPage);
+  await expect(otherPage.getByRole("button", { name: "Start a conversation" })).toBeVisible();
+  await page.getByRole("button", { name: "Sign out everywhere" }).click();
+  await expect(page.locator(".sign-in__error")).toHaveText("You're signed out on every device.");
+  expect((await context.cookies()).filter((item) => item.name === COOKIE)).toEqual([]);
+  await otherPage.reload();
+  await expect(otherPage.locator(".sign-in__error")).toHaveText("Your session has ended. Sign in again.");
+  await other.close();
+});
+
+// Revokes every session on the mock; later tests sign in again.
 test("a token revoked on the server sends the user back to sign-in", async ({ page, context, request }) => {
   await signIn(page);
   await expect(page.getByRole("button", { name: "Start a conversation" })).toBeVisible();
   await request.post(`http://127.0.0.1:${MOCK_PORT}/__revoke`);
-  await page.getByRole("button", { name: "Start a conversation" }).click();
+  // The cookie is still there, so the page renders signed in; its first API call gets 401.
+  await page.reload();
   await expect(page.locator(".sign-in__error")).toHaveText("Your session has ended. Sign in again.");
   expect((await context.cookies()).filter((item) => item.name === COOKIE)).toEqual([]);
 });
@@ -182,7 +213,7 @@ test("a token revoked on the server sends the user back to sign-in", async ({ pa
 test("the Next server never logs the token, cookies or Authorization headers", () => {
   const log = readFileSync(SERVER_LOG, "utf8");
   expect(log.length).toBeGreaterThan(0);
-  for (const secret of [E2E_TOKEN, COOKIE, "Bearer ", "authorization", "cookie"]) {
+  for (const secret of [E2E_TOKEN, E2E_PASSWORD, COOKIE, "Bearer ", "authorization", "cookie", "password"]) {
     expect(log.toLowerCase(), `server log contains ${secret}`).not.toContain(secret.toLowerCase());
   }
 });

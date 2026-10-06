@@ -150,16 +150,16 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     }
   }
 
-  async function signOut() {
+  async function signOut(everywhere = false) {
     abort.current?.abort();
     try {
-      await api.signOut();
+      await api.signOut(everywhere);
     } catch (caught) {
       handle(caught);
       return;
     }
     fail({ status: 401, code: "SIGNED_OUT_BY_USER", message: "" });
-    setNotice("You're signed out.");
+    setNotice(everywhere ? "You're signed out on every device." : "You're signed out.");
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -212,6 +212,9 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
         )}
         <button type="button" className="button button--quiet" onClick={() => void signOut()}>
           Sign out
+        </button>
+        <button type="button" className="button button--quiet" onClick={() => void signOut(true)}>
+          Sign out everywhere
         </button>
       </aside>
 

@@ -3,7 +3,9 @@
 
 import { createServer } from "node:http";
 
-export const E2E_TOKEN = "glp_e2e-synthetic-token_9f8e7d6c5b4a";
+export const E2E_TOKEN = "gls_e2e-synthetic-session_9f8e7d6c5b4a";
+export const E2E_USERNAME = "alice";
+export const E2E_PASSWORD = "correct horse battery staple";
 
 const CONV_PREFIX = "conv-";
 // The real orchestrator's MAX_PAGE_SIZE; larger limits get its 422.
@@ -11,7 +13,7 @@ const MAX_PAGE_SIZE = 100;
 const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-store" };
 
 export function startMockOrchestrator(port) {
-  let revoked = false;
+  const sessions = new Set();
   let nextId = 1;
   const conversations = [];
   const messages = new Map();
@@ -70,8 +72,34 @@ export function startMockOrchestrator(port) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://mock");
     if (url.pathname === "/__revoke" && request.method === "POST") {
-      revoked = true;
+      sessions.clear();
       return json(response, 200, {});
+    }
+    if (url.pathname === "/v1/sessions" && request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const { username, password } = JSON.parse(body);
+      if (username === "locked") {
+        response.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
+        return response.end(JSON.stringify({ error: { code: "SIGN_IN_THROTTLED", message: "m" } }));
+      }
+      if (username !== E2E_USERNAME || password !== E2E_PASSWORD) {
+        return fail(response, 401, "INVALID_CREDENTIALS", "Wrong username or password.");
+      }
+      const token = `${E2E_TOKEN}${nextId++}`;
+      sessions.add(token);
+      const expiresAt = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
+      return json(response, 201, { session_token: token, principal_id: "user-1", expires_at: expiresAt });
+    }
+    const bearer = (request.headers.authorization ?? "").replace(/^Bearer /, "");
+    if (url.pathname === "/v1/sessions/current" && request.method === "DELETE" && sessions.delete(bearer)) {
+      response.writeHead(204);
+      return response.end();
+    }
+    if (url.pathname === "/v1/sessions" && request.method === "DELETE" && sessions.has(bearer)) {
+      sessions.clear();
+      response.writeHead(204);
+      return response.end();
     }
     if (url.pathname === "/__seed-long" && request.method === "POST") {
       const row = createConversation("Long conversation");
@@ -83,7 +111,7 @@ export function startMockOrchestrator(port) {
     if (!(limit >= 1 && limit <= MAX_PAGE_SIZE) || !(offset >= 0)) {
       return json(response, 422, { error: { code: "VALIDATION_FAILED", message: "Request validation failed.", fields: { limit: "out of range" } } });
     }
-    if (request.headers.authorization !== `Bearer ${E2E_TOKEN}` || revoked) {
+    if (!sessions.has(bearer)) {
       return fail(response, 401, "UNAUTHENTICATED", "Missing or invalid API token.");
     }
     let body = "";

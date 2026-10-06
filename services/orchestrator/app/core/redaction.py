@@ -3,7 +3,7 @@
 Three layers, applied in order:
 1. Exact known secrets (values from settings), longest first.
 2. Known credential shapes: private key blocks, provider API keys, GitHub, AWS and
-   Slack tokens, JWTs.
+   Slack tokens, JWTs, GreenLoop API (glt_) and session (gls_) tokens.
 3. Quoted keys (JSON and Python dicts): `"password": "x"`, `'db_password': 'x'`,
    `"apiKey":"x"` keep the key and quotes and lose the value. A key matches when it
    ends with a secret word, so `access_token` matches and `token_count` doesn't.
@@ -39,6 +39,7 @@ _SHAPES: tuple[re.Pattern[str], ...] = (
     re.compile(r"\bgh[pousr]_[A-Za-z0-9]{30,200}"),
     re.compile(r"\bgithub_pat_[A-Za-z0-9_]{20,200}"),
     re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
+    re.compile(r"\bgl[ts]_[A-Za-z0-9_\-]{20,200}"),
     re.compile(r"\bxox[abprs]-[A-Za-z0-9\-]{10,200}"),
     re.compile(r"\beyJ[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}\.[A-Za-z0-9_\-]{5,}"),
 )

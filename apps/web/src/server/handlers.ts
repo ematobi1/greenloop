@@ -28,7 +28,7 @@ const SSE_HEADERS = {
 };
 
 function signedOut(): Response {
-  return errorResponse(401, "SIGNED_OUT", "Sign in with your GreenLoop API token.", {
+  return errorResponse(401, "SIGNED_OUT", "Sign in to continue.", {
     "Set-Cookie": clearedSessionCookie(),
   });
 }
@@ -68,38 +68,74 @@ async function forwardJson(
   return jsonResponse(await response.json(), successStatus);
 }
 
+// Username and password go to the orchestrator once; only the session token it returns
+// is kept, in the httpOnly cookie. The password is never stored or logged here.
 export async function signIn(request: Request, deps: Deps): Promise<Response> {
   const rejected = guarded(request, deps, true);
   if (rejected) return rejected;
   const body = await readJsonBody(request, SMALL_BODY_BYTES);
   if (body === BODY_TOO_LARGE) return tooLarge();
-  const token = typeof body === "object" && body !== null ? (body as { token?: unknown }).token : undefined;
-  if (!isPlausibleToken(token)) {
-    return validationFailed("token", "Paste the API token exactly as issued.");
+  const fields = typeof body === "object" && body !== null ? (body as Record<string, unknown>) : {};
+  const { username, password } = fields;
+  if (typeof username !== "string" || !username.trim() || username.length > 64) {
+    return validationFailed("username", "Enter your username.");
+  }
+  if (typeof password !== "string" || !password || password.length > 256) {
+    return validationFailed("password", "Enter your password.");
   }
   let response: Response;
   try {
     response = await callOrchestrator(deps, {
-      method: "GET",
-      path: "/v1/conversations?limit=1",
-      token,
+      method: "POST",
+      path: "/v1/sessions",
+      token: null,
+      body: { username, password },
       signal: request.signal,
     });
   } catch (error) {
     if (error instanceof UpstreamFailure) return error.response;
     throw error;
   }
-  if (response.status === 401) {
-    return errorResponse(401, "INVALID_TOKEN", "That token isn't valid. Check it and try again.");
-  }
   if (!response.ok) return relayError(response);
-  return emptyResponse(204, { "Set-Cookie": sessionCookie(token) });
+  const session = (await response.json().catch(() => null)) as { session_token?: unknown; expires_at?: unknown } | null;
+  const expiresAt = typeof session?.expires_at === "string" ? Date.parse(session.expires_at) : NaN;
+  if (!isPlausibleToken(session?.session_token) || Number.isNaN(expiresAt)) {
+    return errorResponse(502, "ORCHESTRATOR_ERROR", "The GreenLoop server sent an unexpected reply.");
+  }
+  return emptyResponse(204, {
+    "Set-Cookie": sessionCookie(session.session_token, (expiresAt - Date.now()) / 1000),
+  });
 }
 
+// Revokes the server-side session (or every session with ?scope=all), then clears the
+// cookie whatever the orchestrator says, so the browser is signed out either way.
 export async function signOut(request: Request, deps: Deps): Promise<Response> {
   const rejected = guarded(request, deps, false);
   if (rejected) return rejected;
-  return emptyResponse(204, { "Set-Cookie": clearedSessionCookie() });
+  const token = readSessionToken(request);
+  const everywhere = new URL(request.url).searchParams.get("scope") === "all";
+  const cleared = { "Set-Cookie": clearedSessionCookie() };
+  if (!token) return emptyResponse(204, cleared);
+  try {
+    const response = await callOrchestrator(deps, {
+      method: "DELETE",
+      path: everywhere ? "/v1/sessions" : "/v1/sessions/current",
+      token,
+      signal: request.signal,
+    });
+    if (everywhere && !response.ok && response.status !== 401) {
+      const failure = await relayError(response);
+      failure.headers.set("Set-Cookie", clearedSessionCookie());
+      return failure;
+    }
+  } catch (error) {
+    if (!(error instanceof UpstreamFailure)) throw error;
+    if (everywhere) {
+      error.response.headers.set("Set-Cookie", clearedSessionCookie());
+      return error.response;
+    }
+  }
+  return emptyResponse(204, cleared);
 }
 
 export async function listConversations(request: Request, deps: Deps): Promise<Response> {

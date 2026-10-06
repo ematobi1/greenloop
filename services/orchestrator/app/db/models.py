@@ -115,6 +115,43 @@ class ApiTokenRow(TimestampMixin, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 
+class UserCredentialRow(TimestampMixin, Base):
+    """Username and argon2id password hash for a principal that signs in to the web app."""
+
+    __tablename__ = "user_credentials"
+
+    principal_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("principals.principal_id"), primary_key=True
+    )
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    password_changed_at: Mapped[datetime] = mapped_column(UtcDateTime())
+
+
+class UserSessionRow(TimestampMixin, Base):
+    """A signed-in browser session. Only the token's SHA256 is stored."""
+
+    __tablename__ = "user_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("principals.principal_id"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class LoginThrottleRow(TimestampMixin, Base):
+    """Failed sign-ins per username, known or not, so a lockout reveals nothing."""
+
+    __tablename__ = "login_throttle"
+
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
 class AuditRecordRow(TimestampMixin, Base):
     __tablename__ = "audit_records"
     __table_args__ = (

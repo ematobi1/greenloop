@@ -5,10 +5,10 @@ import { useState, type FormEvent } from "react";
 import * as api from "@/lib/api";
 import { messageFor } from "@/lib/errors";
 
-// Token paste is a stand-in until real user login (ADR 0010). The field is a password
-// input with autocomplete off; the token is sent once to /api/session and dropped.
+// Username and password go to /api/session once; the browser keeps neither (ADR 0012).
 export default function SignInForm({ notice, onSignedIn }: { notice: string | null; onSignedIn: () => void }) {
-  const [token, setToken] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -17,11 +17,12 @@ export default function SignInForm({ notice, onSignedIn }: { notice: string | nu
     setPending(true);
     setError(null);
     try {
-      await api.signIn(token.trim());
-      setToken("");
+      await api.signIn(username.trim(), password);
+      setPassword("");
       onSignedIn();
     } catch (failure) {
-      setError(failure instanceof api.ApiError ? messageFor(failure.failure) : messageFor({ status: 0, code: "", message: "" }));
+      setPassword("");
+      setError(messageFor(failure instanceof api.ApiError ? failure.failure : { status: 0, code: "", message: "" }));
     } finally {
       setPending(false);
     }
@@ -33,21 +34,35 @@ export default function SignInForm({ notice, onSignedIn }: { notice: string | nu
       <h1 id="sign-in-title" className="section__title">
         Sign in
       </h1>
-      <label htmlFor="api-token" className="sign-in__label">
-        GreenLoop API token
+      <label htmlFor="username" className="sign-in__label">
+        Username
       </label>
       <input
-        id="api-token"
-        name="api-token"
-        type="password"
-        autoComplete="off"
+        id="username"
+        name="username"
+        type="text"
+        autoComplete="username"
+        autoCapitalize="none"
         spellCheck={false}
         required
         className="sign-in__input"
-        value={token}
-        onChange={(event) => setToken(event.target.value)}
+        value={username}
+        onChange={(event) => setUsername(event.target.value)}
       />
-      <button type="submit" className="button" disabled={pending || token.trim() === ""}>
+      <label htmlFor="password" className="sign-in__label">
+        Password
+      </label>
+      <input
+        id="password"
+        name="password"
+        type="password"
+        autoComplete="current-password"
+        required
+        className="sign-in__input"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+      />
+      <button type="submit" className="button" disabled={pending || username.trim() === "" || password === ""}>
         {pending ? "Signing in…" : "Sign in"}
       </button>
       <p className="sign-in__error" role="alert">

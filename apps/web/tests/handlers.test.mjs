@@ -57,29 +57,69 @@ async function assertNoToken(response) {
   }
 }
 
-test("sign-in checks the token upstream, then sets the cookie and returns no body", async () => {
-  const { calls, deps } = upstream(Response.json({ data: [], meta: { total: 0, limit: 1, offset: 0 } }));
-  const response = await signIn(request("/api/session", { method: "POST", body: { token: TOKEN }, signedIn: false }), deps);
+const CREDENTIALS = { username: "alice", password: "correct horse battery staple" };
+const session = (seconds = 3600) =>
+  Response.json(
+    { session_token: TOKEN, principal_id: "user-1", expires_at: new Date(Date.now() + seconds * 1000).toISOString() },
+    { status: 201 },
+  );
+
+test("sign-in trades username and password for a session cookie and returns no body", async () => {
+  const { calls, deps } = upstream(session());
+  const response = await signIn(request("/api/session", { method: "POST", body: CREDENTIALS, signedIn: false }), deps);
   assert.equal(response.status, 204);
   assert.equal(await response.text(), "");
-  assert.ok(response.headers.get("set-cookie").startsWith(`${SESSION_COOKIE}=${TOKEN};`));
-  assert.equal(calls[0].url, "http://orchestrator:8000/v1/conversations?limit=1");
-  assert.equal(calls[0].init.headers.Authorization, `Bearer ${TOKEN}`);
+  const cookie = response.headers.get("set-cookie");
+  assert.ok(cookie.startsWith(`${SESSION_COOKIE}=${TOKEN};`));
+  const maxAge = Number(/Max-Age=(\d+)/.exec(cookie)[1]);
+  assert.ok(maxAge > 3500 && maxAge <= 3600, `Max-Age ${maxAge} follows the session's expiry`);
+  assert.equal(calls[0].url, "http://orchestrator:8000/v1/sessions");
+  assert.equal(calls[0].init.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].init.body), CREDENTIALS);
+  assert.equal(calls[0].init.headers.Authorization, undefined);
 });
 
-test("sign-in with a rejected token sets no cookie", async () => {
-  const { deps } = upstream(apiError(401, "UNAUTHENTICATED"));
-  const response = await signIn(request("/api/session", { method: "POST", body: { token: TOKEN }, signedIn: false }), deps);
-  assert.equal(response.status, 401);
-  assert.equal((await response.json()).error.code, "INVALID_TOKEN");
-  assert.equal(response.headers.get("set-cookie"), null);
+test("the cookie never outlives 12 hours whatever the server says", async () => {
+  const { deps } = upstream(session(7 * 24 * 3600));
+  const response = await signIn(request("/api/session", { method: "POST", body: CREDENTIALS, signedIn: false }), deps);
+  assert.match(response.headers.get("set-cookie"), /Max-Age=43200;/);
 });
 
-test("sign-in refuses malformed tokens without calling upstream", async () => {
-  for (const token of [undefined, "", "two words", "a;b", 7]) {
+test("wrong credentials and lockouts are relayed and set no cookie", async () => {
+  const wrong = await signIn(
+    request("/api/session", { method: "POST", body: CREDENTIALS, signedIn: false }),
+    upstream(apiError(401, "INVALID_CREDENTIALS")).deps,
+  );
+  assert.equal(wrong.status, 401);
+  assert.equal((await wrong.json()).error.code, "INVALID_CREDENTIALS");
+  assert.ok(!wrong.headers.get("set-cookie")?.includes(TOKEN));
+
+  const throttled = new Response(JSON.stringify({ error: { code: "SIGN_IN_THROTTLED", message: "m" } }), {
+    status: 429,
+    headers: { "retry-after": "120", "content-type": "application/json" },
+  });
+  const locked = await signIn(
+    request("/api/session", { method: "POST", body: CREDENTIALS, signedIn: false }),
+    upstream(throttled).deps,
+  );
+  assert.equal(locked.status, 429);
+  assert.equal(locked.headers.get("retry-after"), "120");
+  assert.equal(locked.headers.get("set-cookie"), null);
+});
+
+test("an unexpected sign-in reply sets no cookie", async () => {
+  for (const reply of [Response.json({ session_token: "bad token", expires_at: "2030-01-01T00:00:00Z" }), Response.json({})]) {
+    const response = await signIn(request("/api/session", { method: "POST", body: CREDENTIALS, signedIn: false }), upstream(reply).deps);
+    assert.equal(response.status, 502);
+    assert.equal(response.headers.get("set-cookie"), null);
+  }
+});
+
+test("sign-in refuses missing or oversized fields without calling upstream", async () => {
+  for (const body of [{}, { username: "alice" }, { password: "x" }, { username: " ", password: "x" }, { username: "x".repeat(65), password: "x" }, { username: "a", password: "x".repeat(257) }, { token: TOKEN }]) {
     const { calls, deps } = upstream(new Response("{}"));
-    const response = await signIn(request("/api/session", { method: "POST", body: { token }, signedIn: false }), deps);
-    assert.equal(response.status, 422, String(token));
+    const response = await signIn(request("/api/session", { method: "POST", body, signedIn: false }), deps);
+    assert.equal(response.status, 422, JSON.stringify(body));
     assert.equal(calls.length, 0);
   }
 });
@@ -87,23 +127,56 @@ test("sign-in refuses malformed tokens without calling upstream", async () => {
 test("sign-in and sign-out refuse cross-site requests", async () => {
   const { calls, deps } = upstream(new Response("{}"));
   for (const origin of [null, "http://evil.example"]) {
-    const response = await signIn(request("/api/session", { method: "POST", body: { token: TOKEN }, origin }), deps);
+    const response = await signIn(request("/api/session", { method: "POST", body: CREDENTIALS, origin }), deps);
     assert.equal(response.status, 403);
     assert.equal((await signOut(request("/api/session", { method: "DELETE", origin }), deps)).status, 403);
   }
   const form = await signIn(
-    request("/api/session", { method: "POST", body: `token=${TOKEN}`, type: "application/x-www-form-urlencoded" }),
+    request("/api/session", { method: "POST", body: "username=a&password=b", type: "application/x-www-form-urlencoded" }),
     deps,
   );
   assert.equal(form.status, 415);
   assert.equal(calls.length, 0);
 });
 
-test("sign-out clears the cookie", async () => {
-  const { deps } = upstream(new Response("{}"));
+test("sign-out revokes this session upstream and clears the cookie", async () => {
+  const { calls, deps } = upstream(new Response(null, { status: 204 }));
   const response = await signOut(request("/api/session", { method: "DELETE" }), deps);
   assert.equal(response.status, 204);
   assert.ok(response.headers.get("set-cookie").includes("Max-Age=0"));
+  assert.equal(calls[0].url, "http://orchestrator:8000/v1/sessions/current");
+  assert.equal(calls[0].init.method, "DELETE");
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${TOKEN}`);
+});
+
+test("sign-out everywhere revokes every session upstream", async () => {
+  const { calls, deps } = upstream(new Response(null, { status: 204 }));
+  const response = await signOut(request("/api/session?scope=all", { method: "DELETE" }), deps);
+  assert.equal(response.status, 204);
+  assert.equal(calls[0].url, "http://orchestrator:8000/v1/sessions");
+});
+
+test("the cookie is cleared even when the orchestrator can't be reached", async () => {
+  const deps = {
+    config: { orchestratorUrl: "http://orchestrator:8000", webOrigin: ORIGIN },
+    timeoutMs: 1000,
+    fetch: async () => {
+      throw new TypeError("fetch failed");
+    },
+  };
+  const single = await signOut(request("/api/session", { method: "DELETE" }), deps);
+  assert.equal(single.status, 204);
+  assert.ok(single.headers.get("set-cookie").includes("Max-Age=0"));
+  const everywhere = await signOut(request("/api/session?scope=all", { method: "DELETE" }), deps);
+  assert.equal(everywhere.status, 502, "the user must learn that other devices were not signed out");
+  assert.ok(everywhere.headers.get("set-cookie").includes("Max-Age=0"));
+});
+
+test("signing out without a session clears the cookie without calling upstream", async () => {
+  const { calls, deps } = upstream(new Response(null, { status: 204 }));
+  const response = await signOut(request("/api/session", { method: "DELETE", signedIn: false }), deps);
+  assert.equal(response.status, 204);
+  assert.equal(calls.length, 0);
 });
 
 test("every proxied call without a session is 401 and never reaches upstream", async () => {

@@ -8,7 +8,7 @@ Every section except Chat is a placeholder until its roadmap phase (see `src/app
 
 The browser only calls this app's own routes under `src/app/api/`. Those routes call the orchestrator server-side, so the browser never sees the orchestrator URL or the API token ([ADR 0010](../../docs/adr/0010-web-proxies-with-cookie-session.md)).
 
-- Sign in once by pasting your API token (temporary, until real login). It is stored only in an httpOnly, Secure, SameSite=Strict cookie for 12 hours.
+- Sign in with your username and password ([ADR 0012](../../docs/adr/0012-web-sign-in.md)). The server-side session token is stored only in an httpOnly, Secure, SameSite=Strict cookie for at most 12 hours. "Sign out everywhere" ends every session.
 - `src/server/` holds everything that touches the token: config, session cookie, origin check, orchestrator client and the route handlers. Client code must never import from it (a unit test checks).
 - Replies stream over SSE and render as plain text. Never render server text as HTML.
 

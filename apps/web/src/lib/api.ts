@@ -54,12 +54,17 @@ async function send(path: string, init: RequestInit = {}): Promise<Response> {
   return response;
 }
 
-export async function signIn(token: string): Promise<void> {
-  await send("/api/session", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ token }) });
+export async function signIn(username: string, password: string): Promise<void> {
+  await send("/api/session", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username, password }),
+  });
 }
 
-export async function signOut(): Promise<void> {
-  await send("/api/session", { method: "DELETE" });
+// `everywhere` also ends the user's sessions on every other device.
+export async function signOut(everywhere = false): Promise<void> {
+  await send(everywhere ? "/api/session?scope=all" : "/api/session", { method: "DELETE" });
 }
 
 type Page<T> = { data: T[]; meta: { total: number; limit: number; offset: number } };

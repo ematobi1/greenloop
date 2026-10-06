@@ -6,7 +6,8 @@ export type ApiFailure = { status: number; code: string; message: string };
 const MESSAGES: Record<string, string> = {
   CONVERSATION_BUSY: "A reply is still being written in this conversation. Wait for it to finish, then send again.",
   AI_NOT_CONFIGURED: "No AI provider is configured on the GreenLoop server, so it can't reply yet. Ask the admin to set one up.",
-  INVALID_TOKEN: "That token isn't valid. Check it and try again.",
+  INVALID_CREDENTIALS: "Wrong username or password.",
+  SIGN_IN_THROTTLED: "Too many sign-in attempts. Wait a few minutes, then try again.",
   SIGNED_OUT: "Your session has ended. Sign in again.",
   UNAUTHENTICATED: "Your session has ended. Sign in again.",
   CONVERSATION_NOT_FOUND: "This conversation no longer exists.",

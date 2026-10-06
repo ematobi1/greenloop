@@ -20,6 +20,9 @@ def _v1_routes() -> list[tuple[str, str]]:
 
 BUILT_ROUTES = {
     ("GET", "/v1/health"),
+    ("POST", "/v1/sessions"),
+    ("DELETE", "/v1/sessions"),
+    ("DELETE", "/v1/sessions/current"),
     ("GET", "/v1/audit-records"),
     ("GET", "/v1/memory-records"),
     ("POST", "/v1/memory-records"),
@@ -46,7 +49,7 @@ UNBUILT_ROUTES = [route for route in V1_ROUTES if route not in BUILT_ROUTES]
 
 
 def test_every_v1_route_is_covered():
-    assert len(V1_ROUTES) == 23
+    assert len(V1_ROUTES) == 26
     assert set(V1_ROUTES) >= BUILT_ROUTES
 
 
