@@ -209,3 +209,16 @@ def test_one_draft_at_a_time_per_principal(client, auth, use_provider):
     use_provider(FakeProvider(["not json"]))
     assert client.post("/v1/plans", headers=auth, json={"goal": "x"}).status_code == 502
     assert client.app.state.plans_drafting == set()
+
+
+def test_secrets_in_the_goal_or_the_model_output_are_never_stored(
+    client, auth, use_provider, session_factory
+):
+    secret = "sk-ant-api03-SYNTHETICabcdefghijklmnop0123456789"
+    leaky = {"steps": [{"title": "Rotate the key", "description": f"Old key was {secret}."}]}
+    use_provider(FakeProvider([_json(leaky)]))
+    response = client.post("/v1/plans", headers=auth, json={"goal": f"Rotate {secret}"})
+    assert response.status_code == 201, response.text
+    assert secret not in response.text
+    [row] = _plans(session_factory)
+    assert secret not in row.goal and secret not in json.dumps(row.steps)

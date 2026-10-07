@@ -28,6 +28,7 @@ DbSession = Annotated[Session, Depends(get_session)]
 GLOBAL_FAILURE_LIMIT = 30
 GLOBAL_WINDOW_SECONDS = 60.0
 MAX_CONCURRENT_VERIFICATIONS = 4
+VERIFICATION_WAIT_SECONDS = 2.0
 
 
 class SignInLimiter:
@@ -97,11 +98,14 @@ def sign_in(
     session: DbSession,
     limiter: Annotated[SignInLimiter, Depends(get_limiter)],
 ) -> SessionOut:
+    # Never wait long for a slot: a request parked here holds a shared threadpool thread
+    # that every other sync endpoint, authentication included, also needs.
+    if not limiter.verifications.acquire(timeout=VERIFICATION_WAIT_SECONDS):
+        raise _throttled(1)
     try:
-        with limiter.verifications:
-            signed_in = accounts.sign_in(
-                session, body.username, body.password, request.state.correlation_id
-            )
+        signed_in = accounts.sign_in(
+            session, body.username, body.password, request.state.correlation_id
+        )
     except accounts.LoginThrottledError as err:
         session.commit()
         raise _throttled(err.retry_after) from None
@@ -110,6 +114,8 @@ def sign_in(
         if (wait := limiter.record_failure()) is not None:
             raise _throttled(wait) from None
         raise ApiError(401, "INVALID_CREDENTIALS", "Wrong username or password.") from None
+    finally:
+        limiter.verifications.release()
     session.commit()
     return SessionOut(
         session_token=signed_in.token,

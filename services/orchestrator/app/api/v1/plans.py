@@ -82,7 +82,8 @@ async def create_plan(body: PlanCreate, request: Request, principal: CurrentPrin
         try:
             async with asyncio.timeout(state.settings.ai_timeout_seconds):
                 reply = await planner.generate(provider, model_request)
-            steps = planner.parse_plan_steps(reply)
+            # Model output is redacted before it is stored, as chat replies are.
+            steps = planner.parse_plan_steps(state.redactor.redact(reply))
         except TimeoutError:
             raise AiError("timeout").to_api_error() from None
         except AiError as err:
@@ -130,7 +131,7 @@ def _prepare(request: Request, principal: Principal, body: PlanCreate, query_vec
 def _store_plan(request: Request, principal: Principal, body: PlanCreate, steps) -> Plan:
     with request.app.state.session_factory() as session:
         plan = PlanStore(session, principal.principal_id, request.state.correlation_id).create(
-            body.goal, steps, body.conversation_id
+            request.app.state.redactor.redact(body.goal), steps, body.conversation_id
         )
         session.commit()
     return plan

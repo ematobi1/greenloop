@@ -28,7 +28,13 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.audit import recorder
-from app.db.models import LoginThrottleRow, PrincipalRow, UserCredentialRow, UserSessionRow
+from app.db.models import (
+    LoginThrottleRow,
+    PrincipalRole,
+    PrincipalRow,
+    UserCredentialRow,
+    UserSessionRow,
+)
 from greenloop_contracts import AuditOutcome, AuditRecord
 
 SESSION_PREFIX = "gls_"
@@ -36,6 +42,7 @@ SESSION_LIFETIME = timedelta(hours=12)
 MAX_FAILURES = 5
 LOCKOUT = timedelta(minutes=15)
 STALE_THROTTLE = timedelta(days=1)
+PRUNE_BATCH = 500
 PASSWORD_MIN_CHARS = 12
 PASSWORD_MAX_CHARS = 256
 USERNAME = re.compile(r"^[a-z0-9][a-z0-9._-]{2,63}$")
@@ -104,8 +111,11 @@ def _verify(password_hash: str, password: str) -> bool:
 def create_user(session: Session, principal_id: str, username: str, password: str) -> None:
     username = validate_username(username)
     validate_password(password)
-    if session.get(PrincipalRow, principal_id) is None:
+    principal = session.get(PrincipalRow, principal_id)
+    if principal is None:
         raise AccountError("No such principal.")
+    if principal.role != PrincipalRole.USER.value:
+        raise AccountError("Only user principals can sign in to the web app.")
     if session.get(UserCredentialRow, principal_id) is not None:
         raise AccountError("That principal already has a username.")
     try:
@@ -147,14 +157,24 @@ def unlock_user(session: Session, username: str) -> bool:
 
 
 def prune_throttle(session: Session, older_than: timedelta = STALE_THROTTLE) -> int:
-    """Delete throttle rows with no failures and no active lock that haven't changed lately."""
+    """Delete throttle rows with no active lock that haven't changed lately, including
+    ones with a few old failures. Rows another transaction holds are skipped, so two
+    sign-ins pruning at once never wait on each other."""
     now = datetime.now(UTC)
-    return session.execute(
-        delete(LoginThrottleRow).where(
-            LoginThrottleRow.failures == 0,
+    stale = (
+        select(LoginThrottleRow.username)
+        .where(
             LoginThrottleRow.locked_until.is_(None) | (LoginThrottleRow.locked_until < now),
             LoginThrottleRow.updated_at < now - older_than,
         )
+        .limit(PRUNE_BATCH)
+        .with_for_update(skip_locked=True)
+    )
+    names = list(session.scalars(stale))
+    if not names:
+        return 0
+    return session.execute(
+        delete(LoginThrottleRow).where(LoginThrottleRow.username.in_(names))
     ).rowcount
 
 
@@ -183,7 +203,11 @@ def sign_in(session: Session, username: str, password: str, correlation_id: str)
     credential = session.scalars(
         select(UserCredentialRow)
         .join(PrincipalRow, PrincipalRow.principal_id == UserCredentialRow.principal_id)
-        .where(UserCredentialRow.username == username, PrincipalRow.disabled_at.is_(None))
+        .where(
+            UserCredentialRow.username == username,
+            PrincipalRow.disabled_at.is_(None),
+            PrincipalRow.role == PrincipalRole.USER.value,
+        )
     ).one_or_none()
     valid = _verify(credential.password_hash if credential else _dummy_hash(), password)
     if credential is None or not valid:
@@ -243,6 +267,7 @@ def find_session_principal(session: Session, token: str) -> tuple[PrincipalRow, 
             UserSessionRow.revoked_at.is_(None),
             UserSessionRow.expires_at > datetime.now(UTC),
             PrincipalRow.disabled_at.is_(None),
+            PrincipalRow.role == PrincipalRole.USER.value,
         )
     ).one_or_none()
     return (row[0], row[1]) if row is not None else None

@@ -340,8 +340,16 @@ def remember_message(
         message = store.message(conversation_id, message_id)
     except ConversationNotFoundError:
         raise ApiError(404, "MESSAGE_NOT_FOUND", "Message not found.") from None
-    if message.status != MessageStatus.COMPLETE.value:
-        raise ApiError(422, "MESSAGE_INCOMPLETE", "Only a complete message can be saved as memory.")
+    if message.status != MessageStatus.COMPLETE.value or (
+        message.role == "user" and not store.is_answered(message)
+    ):
+        # A message whose turn was refused or failed is kept out of later prompts; saving
+        # it as memory would bring it back into every one of them.
+        raise ApiError(
+            422,
+            "MESSAGE_INCOMPLETE",
+            "Only a complete message that got a reply can be saved as memory.",
+        )
     content = body.content or message.content.strip()
     if not content or len(content) > 20000:
         raise ApiError(
