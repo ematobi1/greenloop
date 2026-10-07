@@ -33,6 +33,8 @@ from greenloop_contracts import (
     MemoryOperation,
     MemoryRecord,
     MemoryScope,
+    MemorySource,
+    Provenance,
 )
 
 
@@ -45,6 +47,10 @@ class MemoryConflictError(Exception):
 
 
 class MemorySharingUnavailableError(Exception):
+    pass
+
+
+class MemoryAlreadyRememberedError(Exception):
     pass
 
 
@@ -121,6 +127,39 @@ class MemoryStore:
             .offset(offset)
         )
         return [row.to_contract() for row in rows], total or 0
+
+    def remember(
+        self,
+        principal_id: str,
+        source_ref: str,
+        content: str,
+        source: MemorySource,
+        category: MemoryCategory,
+    ) -> MemoryRecord:
+        """Save one chat message as a private, unverified record citing `source_ref`.
+
+        Raises MemoryAlreadyRememberedError if a live record already cites it. Writers for
+        the same (principal, source_ref) are serialized, so concurrent saves store one.
+        """
+        self.lock_source_ref(principal_id, source_ref)
+        if self.live_by_source_ref(principal_id, source_ref) is not None:
+            raise MemoryAlreadyRememberedError(source_ref)
+        return self.create(
+            MemoryRecord(
+                record_id=provenance.new_record_id(),
+                principal_id=principal_id,
+                scope=MemoryScope.PRIVATE,
+                category=category,
+                content=content,
+                provenance=Provenance(
+                    source=source,
+                    source_ref=source_ref,
+                    created_by=principal_id,
+                    operation=MemoryOperation.CREATE,
+                ),
+                created_at=datetime.now(UTC),
+            )
+        )
 
     def lock_source_ref(self, principal_id: str, source_ref: str) -> None:
         """Serialize writers for one (principal, source_ref) until this transaction ends, so

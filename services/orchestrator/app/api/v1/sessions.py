@@ -1,10 +1,11 @@
 """Web sign-in sessions (ADR 0012).
 
 POST /v1/sessions is the only unauthenticated write route. Wrong usernames and wrong
-passwords get the same 401. A locked username, and failed attempts while the endpoint
-is being flooded, get 429 with Retry-After; correct credentials for an unlocked
-username always work. The session token is returned once, to the web server, which
-keeps it in an httpOnly cookie.
+passwords get the same 401. A locked username, failed attempts while the endpoint is
+being flooded, and any attempt while every verification slot is busy get 429 with
+Retry-After. A flood of concurrent attempts can therefore delay a real sign-in (ADR
+0012); it never parks a server thread or locks other usernames. The session token is
+returned once, to the web server, which keeps it in an httpOnly cookie.
 """
 
 import threading
@@ -28,17 +29,18 @@ DbSession = Annotated[Session, Depends(get_session)]
 GLOBAL_FAILURE_LIMIT = 30
 GLOBAL_WINDOW_SECONDS = 60.0
 MAX_CONCURRENT_VERIFICATIONS = 4
-VERIFICATION_WAIT_SECONDS = 2.0
 
 
 class SignInLimiter:
     """Process-wide sign-in guard (ADR 0012).
 
     - At most MAX_CONCURRENT_VERIFICATIONS argon2 checks run at once, which bounds the
-      CPU an unauthenticated flood can use.
+      CPU an unauthenticated flood can use; an attempt that finds every slot busy gets
+      429 at once instead of waiting.
     - Failures are counted per window. Past the limit, further failures get 429 instead
-      of 401, but every attempt is still verified, so correct credentials always work:
-      a flood of bad attempts can't lock everyone out. Per-username lockout is separate.
+      of 401, but successes are never counted or refused, so a steady stream of bad
+      attempts slower than the slots allow can't lock out a correct password.
+      Per-username lockout is separate.
     """
 
     def __init__(
@@ -98,9 +100,9 @@ def sign_in(
     session: DbSession,
     limiter: Annotated[SignInLimiter, Depends(get_limiter)],
 ) -> SessionOut:
-    # Never wait long for a slot: a request parked here holds a shared threadpool thread
+    # Never wait for a slot: a request parked here would hold a shared threadpool thread
     # that every other sync endpoint, authentication included, also needs.
-    if not limiter.verifications.acquire(timeout=VERIFICATION_WAIT_SECONDS):
+    if not limiter.verifications.acquire(blocking=False):
         raise _throttled(1)
     try:
         signed_in = accounts.sign_in(

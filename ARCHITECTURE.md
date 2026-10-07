@@ -134,12 +134,12 @@ This document maps every folder to its role, owning component and roadmap phase.
 | Module | Role | Phase |
 |---|---|---|
 | `main.py` | FastAPI app factory and router wiring | 1 |
-| `api/v1/` | REST endpoints: health, chat, memory, plans, agents, dispatches, approvals, audit | 1 (health), 2 |
-| `core/` | Config from environment, auth, logging, errors | 1 (config), 2 (auth) |
+| `api/v1/` | REST endpoints: health, sessions (web sign-in), chat (including remember), memory, plans, agents, dispatches, approvals, audit | 1 (health), 2 |
+| `core/` | Config from environment, auth (API and session tokens), accounts (usernames, argon2id, sessions, lockout), logging, errors, redaction | 1 (config), 2 (auth) |
 | `ai/` | Streaming chat engine, system prompts, request assembly (`context.py`), model providers (Anthropic default, Ollama optional), AI error codes | 2 |
 | `conversations/` | Owner-scoped conversations, ordered write-once messages, the per-conversation turn lease | 2 |
-| `orchestration/` | Reasoning, planner, dispatcher (runs one `Dispatch` on one agent, records execution memory and audit) | 2 (reasoning, planner), 4 (dispatcher) |
-| `memory/` | Store, retrieval, context builder, provenance, execution memory, embeddings | 1 (context builder), 2 |
+| `orchestration/` | Reasoning, planner and plan store (drafts only), dispatcher (runs one `Dispatch` on one agent, records execution memory and audit) | 2 (reasoning, planner), 4 (dispatcher) |
+| `memory/` | Store, retrieval (pgvector ranking with recency fill), context builder, provenance, execution memory, embeddings and indexing | 1 (context builder), 2 |
 | `agents/` | Agent base, in-code registry, deterministic reference agents; planner, research and coding agents (stubs) | 4 |
 | `permissions/` | Policy evaluation, approval requests, and dispatch permission (`dispatch.py`: who may run an agent with model or tool access) | 3 |
 | `tools/` | Tool registry and broker client | 3 |

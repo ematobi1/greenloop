@@ -527,3 +527,16 @@ test("execution memories written by dispatches can be managed too", async () => 
   assert.equal(calls[0].url, `http://orchestrator:8000/v1/memory-records/${EXEC}`);
   assert.equal((await deleteMemory(request("/api/memory/x", { method: "DELETE" }), "mem-other-1", deps)).status, 404);
 });
+
+test("a session reply that has already expired here sets no cookie", async () => {
+  const stale = Response.json(
+    { session_token: TOKEN, principal_id: "user-1", expires_at: new Date(Date.now() - 60_000).toISOString() },
+    { status: 201 },
+  );
+  const response = await signIn(
+    request("/api/session", { method: "POST", body: { username: "alice", password: "pw" }, signedIn: false }),
+    upstream(stale).deps,
+  );
+  assert.equal(response.status, 502);
+  assert.equal(response.headers.get("set-cookie"), null);
+});

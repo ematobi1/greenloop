@@ -81,7 +81,7 @@ async def create_plan(body: PlanCreate, request: Request, principal: CurrentPrin
             raise ApiError(404, "CONVERSATION_NOT_FOUND", "Conversation not found.") from None
         try:
             async with asyncio.timeout(state.settings.ai_timeout_seconds):
-                reply = await planner.generate(provider, model_request)
+                reply, done = await planner.generate(provider, model_request)
             # Model output is redacted before it is stored, as chat replies are.
             steps = planner.parse_plan_steps(state.redactor.redact(reply))
         except TimeoutError:
@@ -92,7 +92,13 @@ async def create_plan(body: PlanCreate, request: Request, principal: CurrentPrin
             raise ApiError(
                 502, "PLAN_DRAFT_INVALID", "The model did not return a usable plan. Try again."
             ) from None
-        return await asyncio.to_thread(_store_plan, request, principal, body, steps)
+        usage = {
+            "provider": provider.config.name,
+            "model": provider.config.model,
+            "input_tokens": done.input_tokens,
+            "output_tokens": done.output_tokens,
+        }
+        return await asyncio.to_thread(_store_plan, request, principal, body, steps, usage)
     finally:
         drafting.discard(principal.principal_id)
 
@@ -128,10 +134,12 @@ def _prepare(request: Request, principal: Principal, body: PlanCreate, query_vec
     return model_request
 
 
-def _store_plan(request: Request, principal: Principal, body: PlanCreate, steps) -> Plan:
+def _store_plan(
+    request: Request, principal: Principal, body: PlanCreate, steps, usage: dict
+) -> Plan:
     with request.app.state.session_factory() as session:
         plan = PlanStore(session, principal.principal_id, request.state.correlation_id).create(
-            request.app.state.redactor.redact(body.goal), steps, body.conversation_id
+            request.app.state.redactor.redact(body.goal), steps, body.conversation_id, usage
         )
         session.commit()
     return plan

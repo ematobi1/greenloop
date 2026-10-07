@@ -99,12 +99,13 @@ export async function signIn(request: Request, deps: Deps): Promise<Response> {
   if (!response.ok) return relayError(response);
   const session = (await response.json().catch(() => null)) as { session_token?: unknown; expires_at?: unknown } | null;
   const expiresAt = typeof session?.expires_at === "string" ? Date.parse(session.expires_at) : NaN;
-  if (!isPlausibleToken(session?.session_token) || Number.isNaN(expiresAt)) {
+  const lifetimeSeconds = (expiresAt - Date.now()) / 1000;
+  // A cookie with no lifetime would be dropped silently (a clock far ahead of the
+  // orchestrator's), leaving the user stuck on sign-in with no error.
+  if (!isPlausibleToken(session?.session_token) || !(lifetimeSeconds >= 1)) {
     return errorResponse(502, "ORCHESTRATOR_ERROR", "The GreenLoop server sent an unexpected reply.");
   }
-  return emptyResponse(204, {
-    "Set-Cookie": sessionCookie(session.session_token, (expiresAt - Date.now()) / 1000),
-  });
+  return emptyResponse(204, { "Set-Cookie": sessionCookie(session.session_token, lifetimeSeconds) });
 }
 
 // Revokes the server-side session (or every session with ?scope=all), then clears the

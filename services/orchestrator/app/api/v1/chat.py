@@ -14,7 +14,7 @@ reply is discarded and the client gets CONVERSATION_NOT_FOUND (404, or an SSE
 import asyncio
 import json
 from collections.abc import AsyncIterator, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 from functools import partial
 from typing import Annotated
 
@@ -37,16 +37,13 @@ from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError, error_body
 from app.db.models import MessageRow, MessageStatus
 from app.db.session import get_session
-from app.memory import provenance
 from app.memory.indexing import index_committed
-from app.memory.store import MemoryStore
+from app.memory.provenance import remember_source_ref
+from app.memory.store import MemoryAlreadyRememberedError, MemoryStore
 from greenloop_contracts import (
     MemoryCategory,
-    MemoryOperation,
     MemoryRecord,
-    MemoryScope,
     MemorySource,
-    Provenance,
 )
 
 router = APIRouter(prefix="/conversations", tags=["chat"])
@@ -333,8 +330,8 @@ def remember_message(
 ) -> MemoryRecord:
     """Explicit "remember this": the user, not the model, decides what becomes memory.
 
-    The record is the principal's own, private, unverified, with provenance source=user
-    and source_ref pointing at the conversation and message it came from.
+    The record is the principal's own, private and unverified; its source is user or agent
+    by who wrote the message, and source_ref points at the conversation and message.
     """
     try:
         message = store.message(conversation_id, message_id)
@@ -351,35 +348,29 @@ def remember_message(
             "Only a complete message that got a reply can be saved as memory.",
         )
     content = body.content or message.content.strip()
-    if not content or len(content) > 20000:
+    if not content or len(content) > 20000 or content not in message.content:
+        # The record cites this message, so it may only keep text the message contains.
         raise ApiError(
             422,
             "VALIDATION_FAILED",
             "Request validation failed.",
-            fields={"content": "Choose 1 to 20000 characters to remember."},
+            fields={"content": "Choose 1 to 20000 characters of the message to remember."},
         )
-    source_ref = f"conversation:{conversation_id}/message:{message_id}"
     memory = MemoryStore(session, request.state.correlation_id)
-    memory.lock_source_ref(principal.principal_id, source_ref)
-    if memory.live_by_source_ref(principal.principal_id, source_ref) is not None:
-        raise ApiError(409, "ALREADY_REMEMBERED", "This message is already saved as memory.")
-    record = MemoryRecord(
-        record_id=provenance.new_record_id(),
-        principal_id=principal.principal_id,
-        scope=MemoryScope.PRIVATE,
-        category=body.category,
-        content=content,
-        provenance=Provenance(
+    try:
+        record = memory.remember(
+            principal.principal_id,
+            remember_source_ref(conversation_id, message_id),
+            content,
             # The user chose to keep it, but a reply was written by the model: never let
             # model output pass as something the user said.
-            source=MemorySource.USER if message.role == "user" else MemorySource.AGENT,
-            source_ref=source_ref,
-            created_by=principal.principal_id,
-            operation=MemoryOperation.CREATE,
-        ),
-        created_at=datetime.now(UTC),
-    )
-    memory.create(record)
+            MemorySource.USER if message.role == "user" else MemorySource.AGENT,
+            body.category,
+        )
+    except MemoryAlreadyRememberedError:
+        raise ApiError(
+            409, "ALREADY_REMEMBERED", "This message is already saved as memory."
+        ) from None
     session.commit()
     index_committed(session, request.app.state.embedder, record)
     return record

@@ -7,6 +7,7 @@ import asyncio
 import anyio.from_thread
 import structlog
 from sqlalchemy import exists, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
 from app.db.models import MemoryEmbeddingRow, MemoryRecordRow
@@ -16,6 +17,7 @@ from greenloop_contracts import MemoryOperation, MemoryRecord
 logger = structlog.get_logger(__name__)
 
 QUERY_TIMEOUT_SECONDS = 3.0
+WRITE_TIMEOUT_SECONDS = 5.0
 
 
 async def embed_texts(embedder: Embedder | None, texts: list[str]) -> list[list[float]] | None:
@@ -33,9 +35,20 @@ def embed_texts_sync(embedder: Embedder | None, texts: list[str]) -> list[list[f
     if embedder is None or not texts:
         return None
     try:
-        return anyio.from_thread.run(embed_texts, embedder, texts)
+        return anyio.from_thread.run(_bounded, embedder, texts)
     except RuntimeError:
-        return asyncio.run(embed_texts(embedder, texts))
+        return asyncio.run(_bounded(embedder, texts))
+
+
+async def _bounded(embedder: Embedder, texts: list[str]) -> list[list[float]] | None:
+    """Embedding after a write gets WRITE_TIMEOUT_SECONDS at most, so a slow embedder never
+    holds a request thread for its full client timeout."""
+    try:
+        async with asyncio.timeout(WRITE_TIMEOUT_SECONDS):
+            return await embed_texts(embedder, texts)
+    except TimeoutError:
+        logger.warning("memory_embedding_timed_out", model=embedder.model)
+        return None
 
 
 def index_committed(session: Session, embedder: Embedder | None, record: MemoryRecord) -> bool:
@@ -47,10 +60,19 @@ def index_committed(session: Session, embedder: Embedder | None, record: MemoryR
     vectors = embed_texts_sync(embedder, [record.content])
     if vectors is None or embedder is None:
         return False
-    session.add(
-        MemoryEmbeddingRow(record_id=record.record_id, model=embedder.model, embedding=vectors[0])
-    )
-    session.commit()
+    try:
+        session.add(
+            MemoryEmbeddingRow(
+                record_id=record.record_id, model=embedder.model, embedding=vectors[0]
+            )
+        )
+        session.commit()
+    except SQLAlchemyError:
+        # The record is already saved; a concurrent backfill or a database blip must not
+        # turn that into an error for the caller.
+        session.rollback()
+        logger.warning("memory_embedding_not_stored", record_id=record.record_id)
+        return False
     return True
 
 

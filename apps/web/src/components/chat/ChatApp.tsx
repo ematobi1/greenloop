@@ -17,6 +17,14 @@ const shown = (message: api.Message): Shown => ({
   incomplete: message.status !== "complete",
 });
 
+// The server's rule: a reply, or a user message that got a complete reply right after it.
+function canRemember(messages: Shown[], index: number): boolean {
+  const message = messages[index];
+  if (message.role !== "user") return true;
+  const reply = messages[index + 1];
+  return reply !== undefined && reply.role !== "user" && !reply.incomplete;
+}
+
 // All text from the server (messages, titles) is rendered as React text children, so
 // it is escaped. Memory and model output are untrusted: never render them as HTML.
 export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: boolean }) {
@@ -226,13 +234,13 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
           <>
             {hidden > 0 && <p className="chat__empty">{hidden} earlier messages aren&apos;t shown.</p>}
             <ol className="chat__messages">
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <li key={message.key} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
                   <span className="message__role">{message.role === "user" ? "You" : "GreenLoop"}</span>
                   <p className="message__text">{message.content}</p>
                   {message.incomplete ? (
                     <span className="message__note">Reply incomplete</span>
-                  ) : remembered.has(message.key) ? (
+                  ) : !canRemember(messages, index) ? null : remembered.has(message.key) ? (
                     <span className="message__note">Saved to memory</span>
                   ) : (
                     <button

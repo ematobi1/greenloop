@@ -10,7 +10,6 @@ from argon2 import PasswordHasher
 from sqlalchemy import select
 
 from app import cli
-from app.api.v1 import sessions as sessions_module
 from app.api.v1.sessions import SignInLimiter
 from app.core import accounts
 from app.core.redaction import Redactor
@@ -261,7 +260,7 @@ def test_cli_revoke_sessions_refuses_an_unknown_principal(session_factory, capsy
     assert "No such principal" in capsys.readouterr().err
 
 
-def test_stale_throttle_rows_are_pruned_on_a_successful_sign_in(client, session_factory, user):
+def test_stale_rows_are_pruned_on_any_attempt(client, session_factory, user):
     with session_factory() as session:
         session.add(LoginThrottleRow(username="old-name", failures=0))
         session.add(LoginThrottleRow(username="old-failures", failures=3))
@@ -272,15 +271,24 @@ def test_stale_throttle_rows_are_pruned_on_a_successful_sign_in(client, session_
                 locked_until=datetime.now(UTC) + timedelta(hours=1),
             )
         )
+        session.add(
+            UserSessionRow(
+                session_id="ses-old",
+                principal_id="user-1",
+                token_hash="0" * 64,
+                expires_at=datetime.now(UTC) - timedelta(days=3),
+            )
+        )
         session.commit()
         for row in session.scalars(select(LoginThrottleRow)):
-            row.updated_at = datetime.now(UTC) - timedelta(days=2)
+            row.updated_at = datetime.now(UTC) - timedelta(hours=2)
         session.commit()
-    assert _sign_in(client).status_code == 201
+    assert _sign_in(client, username="someone-new", password="wrong password!!").status_code == 401
     with session_factory() as session:
         names = set(session.scalars(select(LoginThrottleRow.username)))
+        assert session.get(UserSessionRow, "ses-old") is None
     assert names.isdisjoint({"old-name", "old-failures"})
-    assert "still-locked" in names
+    assert {"still-locked", "someone-new"} <= names
 
 
 def test_system_principals_can_not_get_a_web_login(session_factory, issue_token):
@@ -305,8 +313,7 @@ def test_a_session_for_a_system_principal_is_not_accepted(client, session_factor
     assert client.get("/v1/conversations", headers=_bearer(token)).status_code == 401
 
 
-def test_a_full_verification_queue_answers_429_quickly(client, user, monkeypatch):
-    monkeypatch.setattr(sessions_module, "VERIFICATION_WAIT_SECONDS", 0.05)
+def test_a_full_verification_queue_answers_429_without_waiting(client, user):
     limiter = SignInLimiter(concurrency=1)
     client.app.state.sign_in_limiter = limiter
     limiter.verifications.acquire()

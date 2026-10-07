@@ -18,6 +18,9 @@ Phase 2's exit criteria include "see a drafted plan". Running plans needs the wo
 
 ## Consequences
 
-- A slow model holds a web request open for up to 150 seconds; streaming the draft is a later improvement.
+- Drafting calls the provider through `planner.generate`, not `ChatEngine`: one non-streaming call with its own timeout, size cap and truncation check. Usage (provider, model, tokens) is recorded in the `plan.draft` audit record. A shared "generate once" helper in `ai/` can replace both when a third caller appears.
+- A slow model holds a web request open for up to 150 seconds; streaming the draft is a later improvement. If the browser gives up, the draft still finishes and is stored (bounded to one at a time per principal).
+- The one-draft-at-a-time guard lives in process memory, which holds for the single uvicorn worker the image runs; more workers or replicas need a database lease like the chat turn lease.
+- A plan keeps its `conversation_id` after the conversation is deleted; the plan itself stays readable.
 - A description longer than 4000 characters fails the whole draft rather than being truncated.
 - A "can't plan this" answer to a harmful goal is stored as an ordinary one-step draft.

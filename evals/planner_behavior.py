@@ -137,7 +137,7 @@ async def _run(provider, cases: list[Case]) -> dict[str, list[str]]:
             records(case), case.goal, [], principal_id=PRINCIPAL_ID, redactor=Redactor()
         )
         try:
-            reply = await planner.generate(provider, request)
+            reply, _ = await planner.generate(provider, request)
             results[case.id] = score(case, reply)
         except (AiError, planner.PlanDraftError) as err:
             results[case.id] = [f"error: {type(err).__name__}"]

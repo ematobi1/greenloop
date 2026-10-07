@@ -222,3 +222,21 @@ def test_secrets_in_the_goal_or_the_model_output_are_never_stored(
     assert secret not in response.text
     [row] = _plans(session_factory)
     assert secret not in row.goal and secret not in json.dumps(row.steps)
+
+
+def test_the_draft_audit_records_provider_model_and_tokens(
+    client, auth, use_provider, session_factory
+):
+    use_provider(FakeProvider([_json(GOOD)], usage=(120, 45)))
+    plan_id = client.post("/v1/plans", headers=auth, json={"goal": "x"}).json()["plan_id"]
+    with session_factory() as session:
+        details = session.scalars(
+            select(AuditRecordRow.details).where(AuditRecordRow.resource_id == plan_id)
+        ).one()
+    assert details == {
+        "steps": 2,
+        "provider": "fake",
+        "model": "fake-1",
+        "input_tokens": 120,
+        "output_tokens": 45,
+    }

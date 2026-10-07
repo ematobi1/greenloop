@@ -25,7 +25,14 @@ class PlanStore:
         self._principal_id = principal_id
         self._correlation_id = correlation_id
 
-    def create(self, goal: str, steps: tuple[PlanStep, ...], conversation_id: str | None) -> Plan:
+    def create(
+        self,
+        goal: str,
+        steps: tuple[PlanStep, ...],
+        conversation_id: str | None,
+        usage: dict[str, str | int] | None = None,
+    ) -> Plan:
+        """Store a draft. `usage` (provider, model, tokens) goes into the audit record."""
         now = datetime.now(UTC)
         plan = Plan(
             plan_id=f"plan-{uuid.uuid4().hex}",
@@ -48,7 +55,7 @@ class PlanStore:
                 updated_at=now,
             )
         )
-        self._audit("plan.draft", plan.plan_id, {"steps": len(plan.steps)})
+        self._audit("plan.draft", plan.plan_id, {"steps": len(plan.steps), **(usage or {})})
         return plan
 
     def list(self, *, limit: int, offset: int) -> tuple[list[Plan], int]:
@@ -83,7 +90,7 @@ class PlanStore:
             raise PlanNotFoundError(plan_id)
         return row
 
-    def _audit(self, action: str, plan_id: str, details: dict[str, int]) -> None:
+    def _audit(self, action: str, plan_id: str, details: dict[str, str | int]) -> None:
         recorder.record(
             self._session,
             AuditRecord(

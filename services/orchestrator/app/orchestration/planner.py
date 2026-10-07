@@ -24,6 +24,7 @@ from app.ai.providers.base import Done, GenerationRequest, Message, ModelProvide
 from app.core.redaction import Redactor
 from app.memory.context_builder import build_memory_context
 from greenloop_contracts import MAX_PLAN_STEPS, MemoryRecord, PlanStep
+from greenloop_contracts.plan import check_dependencies
 
 MAX_PLAN_OUTPUT_TOKENS = 8000
 MAX_EXCERPT_CHARS = 8000
@@ -75,18 +76,23 @@ def build_planner_request(
     return request, memory.included_ids
 
 
-async def generate(provider: ModelProvider, request: GenerationRequest) -> str:
+async def generate(provider: ModelProvider, request: GenerationRequest) -> tuple[str, Done]:
+    """The whole reply and its Done event (usage), or PlanDraftError if it is cut off or
+    too long. One call, no tools; ChatEngine streams instead (ADR 0013)."""
     parts: list[str] = []
     size = 0
+    done = Done()
     async for event in provider.stream(request):
         if isinstance(event, TextDelta):
             parts.append(event.text)
             size += len(event.text)
             if size > MAX_REPLY_CHARS:
                 raise PlanDraftError("the reply is too long")
-        elif isinstance(event, Done) and event.truncated:
-            raise PlanDraftError("the reply was cut off")
-    return "".join(parts)
+        elif isinstance(event, Done):
+            if event.truncated:
+                raise PlanDraftError("the reply was cut off")
+            done = event
+    return "".join(parts), done
 
 
 def parse_plan_steps(reply: str) -> tuple[PlanStep, ...]:
@@ -107,9 +113,8 @@ def parse_plan_steps(reply: str) -> tuple[PlanStep, ...]:
         parsed = tuple(PlanStep.model_validate(step) for step in steps)
     except ValidationError:
         raise PlanDraftError("a step does not match the plan contract") from None
-    for index, step in enumerate(parsed):
-        if any(dependency >= index for dependency in step.depends_on):
-            raise PlanDraftError("a step depends on a later step")
-        if len(set(step.depends_on)) != len(step.depends_on):
-            raise PlanDraftError("a step lists a dependency twice")
+    try:
+        check_dependencies(parsed)
+    except ValueError as err:
+        raise PlanDraftError(str(err)) from None
     return parsed

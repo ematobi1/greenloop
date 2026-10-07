@@ -131,3 +131,20 @@ def test_without_an_embedder_the_engine_uses_recency(session_factory):
 def test_embed_memory_needs_an_embedder(session_factory, capsys):
     assert cli.run(["embed-memory"], session_factory, None) == 1
     assert "EMBEDDING_PROVIDER" in capsys.readouterr().err
+
+
+def test_a_vector_that_can_not_be_stored_never_fails_the_write(session_factory, make_record):
+    record = _committed(session_factory, make_record("Prefers tea."))
+    with session_factory() as session:
+        assert indexing.index_committed(session, FakeEmbedder(), record) is True
+    with session_factory() as session:
+        # A concurrent backfill already stored this (record, model): the insert clashes.
+        assert indexing.index_committed(session, FakeEmbedder(), record) is False
+        assert not session.in_transaction()
+
+
+def test_embedding_after_a_write_is_time_bounded(monkeypatch):
+    monkeypatch.setattr(indexing, "WRITE_TIMEOUT_SECONDS", 0.05)
+    started = time.monotonic()
+    assert indexing.embed_texts_sync(SlowEmbedder(), ["x"]) is None
+    assert time.monotonic() - started < 2

@@ -18,6 +18,15 @@ MAX_PLAN_STEPS = 20
 Goal = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2000)]
 
 
+def check_dependencies(steps: "tuple[PlanStep, ...]") -> None:
+    """Raise ValueError unless every step depends only on distinct earlier steps."""
+    for index, step in enumerate(steps):
+        if len(set(step.depends_on)) != len(step.depends_on):
+            raise ValueError(f"step {index} lists a dependency twice")
+        if any(dependency >= index for dependency in step.depends_on):
+            raise ValueError(f"step {index} may only depend on earlier steps")
+
+
 class PlanStatus(StrEnum):
     DRAFT = "draft"
     DISCARDED = "discarded"
@@ -45,11 +54,7 @@ class Plan(ContractModel):
 
     @model_validator(mode="after")
     def _dependencies_point_backwards(self) -> "Plan":
-        for index, step in enumerate(self.steps):
-            if len(set(step.depends_on)) != len(step.depends_on):
-                raise ValueError(f"step {index} lists a dependency twice")
-            if any(dependency >= index for dependency in step.depends_on):
-                raise ValueError(f"step {index} may only depend on earlier steps")
+        check_dependencies(self.steps)
         if self.updated_at < self.created_at:
             raise ValueError("updated_at cannot be before created_at")
         return self

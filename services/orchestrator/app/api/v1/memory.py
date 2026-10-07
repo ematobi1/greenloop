@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -48,7 +49,17 @@ from greenloop_contracts.base import Identifier, UtcDatetime
 router = APIRouter(prefix="/memory-records", tags=["memory"])
 
 Content = Annotated[str, StringConstraints(min_length=1, max_length=20000)]
-SourceRef = Annotated[str, StringConstraints(min_length=1, max_length=500)]
+
+
+def _not_reserved(source_ref: str) -> str:
+    if source_ref.startswith(provenance.REMEMBER_PREFIX):
+        raise ValueError("source refs starting with 'conversation:' are set by the server")
+    return source_ref
+
+
+SourceRef = Annotated[
+    str, StringConstraints(min_length=1, max_length=500), AfterValidator(_not_reserved)
+]
 Tags = Annotated[tuple[Identifier, ...], Field(max_length=32)]
 RecordId = Annotated[str, Path(max_length=128)]
 

@@ -161,3 +161,50 @@ def test_a_message_whose_turn_failed_can_not_be_remembered(client, auth, use_pro
     [message] = client.get(f"{URL}/{conversation_id}/messages", headers=auth).json()["data"][:1]
     response = _remember(client, auth, conversation_id, message["message_id"])
     assert (response.status_code, response.json()["error"]["code"]) == (422, "MESSAGE_INCOMPLETE")
+
+
+def test_editing_a_saved_reply_never_relabels_it_as_the_users(client, auth, turn):
+    conversation_id, _, reply_id = turn
+    saved = _remember(client, auth, conversation_id, reply_id).json()
+    for operation, body in (
+        ("supersede", {"content": "You prefer green tea.", "category": "decision"}),
+        ("correct", {"content": "You prefer jasmine tea."}),
+    ):
+        latest = client.get("/v1/memory-records", headers=auth).json()["data"][0]
+        revised = client.post(
+            f"/v1/memory-records/{latest['record_id']}/revisions",
+            headers=auth,
+            json={"operation": operation, **body},
+        ).json()
+        assert revised["provenance"]["source"] == "agent", operation
+        assert revised["provenance"]["source_ref"] == saved["provenance"]["source_ref"]
+        assert revised["provenance"]["created_by"] == "user-1"
+
+
+def test_kept_text_must_come_from_the_message(client, auth, turn):
+    conversation_id, user_message_id, _ = turn
+    response = _remember(client, auth, conversation_id, user_message_id, content="I prefer coffee")
+    assert response.status_code == 422
+    assert (
+        _remember(client, auth, conversation_id, user_message_id, content="green tea").status_code
+        == 201
+    )
+
+
+@pytest.mark.parametrize("path", ["", "/{record_id}/revisions"])
+def test_clients_can_not_claim_a_remember_source_ref(client, auth, turn, path):
+    conversation_id, user_message_id, _ = turn
+    forged = f"conversation:{conversation_id}/message:{user_message_id}"
+    record = client.post(
+        "/v1/memory-records",
+        headers=auth,
+        json={"scope": "private", "category": "user_context", "content": "x"},
+    ).json()
+    url = "/v1/memory-records" + path.format(record_id=record["record_id"])
+    body = (
+        {"scope": "private", "category": "user_context", "content": "y", "source_ref": forged}
+        if not path
+        else {"operation": "correct", "content": "y", "source_ref": forged}
+    )
+    assert client.post(url, headers=auth, json=body).status_code == 422
+    assert _remember(client, auth, conversation_id, user_message_id).status_code == 201
