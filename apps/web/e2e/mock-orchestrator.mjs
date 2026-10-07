@@ -3,7 +3,9 @@
 
 import { createServer } from "node:http";
 
-export const E2E_TOKEN = "glp_e2e-synthetic-token_9f8e7d6c5b4a";
+export const E2E_TOKEN = "gls_e2e-synthetic-session_9f8e7d6c5b4a";
+export const E2E_USERNAME = "alice";
+export const E2E_PASSWORD = "correct horse battery staple";
 
 const CONV_PREFIX = "conv-";
 // The real orchestrator's MAX_PAGE_SIZE; larger limits get its 422.
@@ -11,10 +13,11 @@ const MAX_PAGE_SIZE = 100;
 const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-store" };
 
 export function startMockOrchestrator(port) {
-  let revoked = false;
+  const sessions = new Set();
   let nextId = 1;
   const conversations = [];
   const messages = new Map();
+  const remembered = new Set();
 
   const json = (response, status, body) => {
     response.writeHead(status, { "Content-Type": "application/json" });
@@ -27,7 +30,7 @@ export function startMockOrchestrator(port) {
   function message(conversationId, role, content, status = "complete") {
     const list = messages.get(conversationId);
     const row = {
-      message_id: `msg-${nextId++}`,
+      message_id: `msg-${String(nextId++).padStart(32, "0")}`,
       conversation_id: conversationId,
       sequence: list.length + 1,
       role,
@@ -58,6 +61,26 @@ export function startMockOrchestrator(port) {
     response.end();
   }
 
+  const memory = new Map();
+  const plans = new Map();
+
+  function addMemory(content, operation, predecessor) {
+    const record = {
+      record_id: `mem-${String(nextId++).padStart(32, "0")}`,
+      principal_id: "user-1",
+      scope: "private",
+      category: "user_context",
+      confidence: operation === "correct" ? "corrected" : "unverified",
+      content,
+      created_at: now(),
+      provenance: { source: "user", source_ref: null, operation, supersedes: predecessor?.record_id ?? null },
+      live: true,
+    };
+    record.chain = predecessor?.chain ?? record.record_id;
+    memory.set(record.record_id, record);
+    return record;
+  }
+
   function createConversation(title) {
     const id = `${CONV_PREFIX}${String(nextId++).padStart(32, "0")}`;
     const row = { conversation_id: id, title, created_at: now(), updated_at: now() };
@@ -69,8 +92,34 @@ export function startMockOrchestrator(port) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, "http://mock");
     if (url.pathname === "/__revoke" && request.method === "POST") {
-      revoked = true;
+      sessions.clear();
       return json(response, 200, {});
+    }
+    if (url.pathname === "/v1/sessions" && request.method === "POST") {
+      let body = "";
+      for await (const chunk of request) body += chunk;
+      const { username, password } = JSON.parse(body);
+      if (username === "locked") {
+        response.writeHead(429, { "Content-Type": "application/json", "Retry-After": "60" });
+        return response.end(JSON.stringify({ error: { code: "SIGN_IN_THROTTLED", message: "m" } }));
+      }
+      if (username !== E2E_USERNAME || password !== E2E_PASSWORD) {
+        return fail(response, 401, "INVALID_CREDENTIALS", "Wrong username or password.");
+      }
+      const token = `${E2E_TOKEN}${nextId++}`;
+      sessions.add(token);
+      const expiresAt = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
+      return json(response, 201, { session_token: token, principal_id: "user-1", expires_at: expiresAt });
+    }
+    const bearer = (request.headers.authorization ?? "").replace(/^Bearer /, "");
+    if (url.pathname === "/v1/sessions/current" && request.method === "DELETE" && sessions.delete(bearer)) {
+      response.writeHead(204);
+      return response.end();
+    }
+    if (url.pathname === "/v1/sessions" && request.method === "DELETE" && sessions.has(bearer)) {
+      sessions.clear();
+      response.writeHead(204);
+      return response.end();
     }
     if (url.pathname === "/__seed-long" && request.method === "POST") {
       const row = createConversation("Long conversation");
@@ -82,7 +131,7 @@ export function startMockOrchestrator(port) {
     if (!(limit >= 1 && limit <= MAX_PAGE_SIZE) || !(offset >= 0)) {
       return json(response, 422, { error: { code: "VALIDATION_FAILED", message: "Request validation failed.", fields: { limit: "out of range" } } });
     }
-    if (request.headers.authorization !== `Bearer ${E2E_TOKEN}` || revoked) {
+    if (!sessions.has(bearer)) {
       return fail(response, 401, "UNAUTHENTICATED", "Missing or invalid API token.");
     }
     let body = "";
@@ -97,6 +146,67 @@ export function startMockOrchestrator(port) {
     }
     if (url.pathname === "/v1/conversations" && request.method === "POST") {
       return json(response, 201, createConversation(data.title ?? "New conversation"));
+    }
+    const remember = /^\/v1\/conversations\/([^/]+)\/messages\/([^/]+)\/remember$/.exec(url.pathname);
+    if (remember && request.method === "POST") {
+      const found = messages.get(remember[1])?.find((row) => row.message_id === remember[2]);
+      if (!found) return fail(response, 404, "MESSAGE_NOT_FOUND", "Message not found.");
+      if (remembered.has(found.message_id)) return fail(response, 409, "ALREADY_REMEMBERED", "Already saved.");
+      remembered.add(found.message_id);
+      return json(response, 201, addMemory(found.content, "create", null));
+    }
+    if (url.pathname === "/v1/plans" && request.method === "POST") {
+      const plan = {
+        plan_id: `plan-${String(nextId++).padStart(32, "0")}`,
+        principal_id: "user-1",
+        goal: data.goal,
+        status: "draft",
+        conversation_id: data.conversation_id ?? null,
+        steps: [
+          { title: "Export the posts", description: "Download them as Markdown.", depends_on: [] },
+          { title: "<img src=x onerror=\"window.__pwned=3\">Publish", description: "Needs your approval when run.", depends_on: [0] },
+        ],
+        created_at: now(),
+        updated_at: now(),
+      };
+      plans.set(plan.plan_id, plan);
+      return json(response, 201, plan);
+    }
+    const planMatch = /^\/v1\/plans\/([^/]+)$/.exec(url.pathname);
+    if (planMatch && request.method === "DELETE") {
+      const plan = plans.get(planMatch[1]);
+      if (!plan) return fail(response, 404, "PLAN_NOT_FOUND", "Plan not found.");
+      plan.status = "discarded";
+      response.writeHead(204);
+      return response.end();
+    }
+    if (url.pathname === "/v1/memory-records" && request.method === "GET") {
+      const q = (url.searchParams.get("q") ?? "").toLowerCase();
+      const live = [...memory.values()]
+        .filter((record) => record.live && record.content.toLowerCase().includes(q))
+        .reverse();
+      return json(response, 200, {
+        data: live.slice(offset, offset + limit),
+        meta: { total: live.length, limit, offset },
+      });
+    }
+    const memoryMatch = /^\/v1\/memory-records\/([^/]+)(\/history|\/revisions)?$/.exec(url.pathname);
+    const target = memoryMatch && memory.get(memoryMatch[1]);
+    if (memoryMatch && !target) return fail(response, 404, "MEMORY_RECORD_NOT_FOUND", "Memory record not found.");
+    if (memoryMatch?.[2] === "/history" && request.method === "GET") {
+      const chain = [...memory.values()].filter((record) => record.chain === target.chain);
+      return json(response, 200, { data: chain, meta: { total: chain.length, limit: chain.length, offset: 0 } });
+    }
+    if (memoryMatch?.[2] === "/revisions" && request.method === "POST") {
+      if (!target.live) return fail(response, 409, "MEMORY_RECORD_CONFLICT", "Not the current version.");
+      target.live = false;
+      return json(response, 201, addMemory(data.content, data.operation, target));
+    }
+    if (memoryMatch && !memoryMatch[2] && request.method === "DELETE") {
+      for (const record of memory.values()) if (record.chain === target.chain) record.live = false;
+      addMemory("", "delete", target).live = false;
+      response.writeHead(204);
+      return response.end();
     }
     const match = /^\/v1\/conversations\/([^/]+)\/messages$/.exec(url.pathname);
     if (match && messages.has(match[1])) {

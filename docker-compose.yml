@@ -59,6 +59,12 @@ services:
       AI_HISTORY_MESSAGE_LIMIT: ${AI_HISTORY_MESSAGE_LIMIT:-}
       AI_MAX_MESSAGE_CHARS: ${AI_MAX_MESSAGE_CHARS:-}
       AI_MEMORY_RECORD_LIMIT: ${AI_MEMORY_RECORD_LIMIT:-}
+      # Memory embeddings from Ollama on the host (ADR 0011). "none" keeps recency retrieval.
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-none}
+      EMBEDDING_BASE_URL: ${EMBEDDING_BASE_URL:-http://host.docker.internal:11434}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${GREENLOOP_ORCHESTRATOR_PORT:-8000}:8000"
     depends_on:

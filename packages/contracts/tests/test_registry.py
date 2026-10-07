@@ -13,6 +13,8 @@ from greenloop_contracts import (
 EXPECTED = {
     "Agent",
     "Task",
+    "Plan",
+    "PlanStep",
     "Dispatch",
     "ToolPermission",
     "ToolGrant",
@@ -28,7 +30,7 @@ EXPECTED = {
 }
 
 
-def test_registry_holds_exactly_the_fourteen_contracts():
+def test_registry_holds_exactly_the_sixteen_contracts():
     assert set(CONTRACTS) == EXPECTED
 
 

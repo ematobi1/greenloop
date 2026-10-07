@@ -5,6 +5,7 @@ import { useCallback, useEffect, useRef, useState, type FormEvent, type Keyboard
 import * as api from "@/lib/api";
 import { isSignedOut, messageFor, type ApiFailure } from "@/lib/errors";
 
+import PlanPanel from "./PlanPanel";
 import SignInForm from "./SignInForm";
 
 type Shown = { key: string; role: string; content: string; incomplete: boolean };
@@ -15,6 +16,14 @@ const shown = (message: api.Message): Shown => ({
   content: message.content,
   incomplete: message.status !== "complete",
 });
+
+// The server's rule: a reply, or a user message that got a complete reply right after it.
+function canRemember(messages: Shown[], index: number): boolean {
+  const message = messages[index];
+  if (message.role !== "user") return true;
+  const reply = messages[index + 1];
+  return reply !== undefined && reply.role !== "user" && !reply.incomplete;
+}
 
 // All text from the server (messages, titles) is rendered as React text children, so
 // it is escaped. Memory and model output are untrusted: never render them as HTML.
@@ -29,6 +38,8 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   const [draft, setDraft] = useState("");
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusNote, setStatusNote] = useState<string | null>(null);
+  const [remembered, setRemembered] = useState<ReadonlySet<string>>(new Set());
   const abort = useRef<AbortController | null>(null);
 
   const fail = useCallback((failure: ApiFailure) => {
@@ -79,6 +90,7 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   function select(conversationId: string) {
     if (streaming !== null) return;
     setError(null);
+    setStatusNote(null);
     setMessages([]);
     setHidden(0);
     setActiveId(conversationId);
@@ -131,16 +143,32 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     }
   }
 
-  async function signOut() {
+  async function remember(messageId: string) {
+    if (!activeId) return;
+    setError(null);
+    setStatusNote(null);
+    try {
+      await api.rememberMessage(activeId, messageId);
+      setRemembered((current) => new Set(current).add(messageId));
+      setStatusNote("Saved to memory.");
+    } catch (caught) {
+      if (caught instanceof api.ApiError && caught.failure.code === "ALREADY_REMEMBERED") {
+        setRemembered((current) => new Set(current).add(messageId));
+      }
+      handle(caught);
+    }
+  }
+
+  async function signOut(everywhere = false) {
     abort.current?.abort();
     try {
-      await api.signOut();
+      await api.signOut(everywhere);
     } catch (caught) {
       handle(caught);
       return;
     }
     fail({ status: 401, code: "SIGNED_OUT_BY_USER", message: "" });
-    setNotice("You're signed out.");
+    setNotice(everywhere ? "You're signed out on every device." : "You're signed out.");
   }
 
   function submit(event: FormEvent<HTMLFormElement>) {
@@ -194,6 +222,9 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
         <button type="button" className="button button--quiet" onClick={() => void signOut()}>
           Sign out
         </button>
+        <button type="button" className="button button--quiet" onClick={() => void signOut(true)}>
+          Sign out everywhere
+        </button>
       </aside>
 
       <section className="chat__main" aria-label="Messages">
@@ -203,11 +234,23 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
           <>
             {hidden > 0 && <p className="chat__empty">{hidden} earlier messages aren&apos;t shown.</p>}
             <ol className="chat__messages">
-              {messages.map((message) => (
+              {messages.map((message, index) => (
                 <li key={message.key} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
                   <span className="message__role">{message.role === "user" ? "You" : "GreenLoop"}</span>
                   <p className="message__text">{message.content}</p>
-                  {message.incomplete && <span className="message__note">Reply incomplete</span>}
+                  {message.incomplete ? (
+                    <span className="message__note">Reply incomplete</span>
+                  ) : !canRemember(messages, index) ? null : remembered.has(message.key) ? (
+                    <span className="message__note">Saved to memory</span>
+                  ) : (
+                    <button
+                      type="button"
+                      className="button button--quiet message__remember"
+                      onClick={() => void remember(message.key)}
+                    >
+                      Remember
+                    </button>
+                  )}
                 </li>
               ))}
               {streaming !== null && (
@@ -236,10 +279,14 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
                 {streaming !== null ? "Replying…" : "Send"}
               </button>
             </form>
+            <PlanPanel key={activeId} conversationId={activeId} onError={handle} />
           </>
         )}
         <p className="chat__error" role="alert">
           {error}
+        </p>
+        <p className="chat__notice" role="status">
+          {statusNote}
         </p>
       </section>
     </div>

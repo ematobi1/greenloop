@@ -1,5 +1,14 @@
 # Changelog: greenloop-contracts
 
+## 0.5.0 (2026-10-05)
+
+Plan drafting (roadmap phase 2). Additive; nothing existing changes.
+
+### Added
+
+- **Plan** (schema v1): a drafted plan for a `goal` (1 to 2000 characters): `plan_id`, `principal_id`, optional `conversation_id`, `status` (`draft` or `discarded`), and 1 to `MAX_PLAN_STEPS` (20) steps. Each step may depend only on earlier steps, by index and without repeats, so every plan is acyclic and already in execution order.
+- **PlanStep** (schema v1): `title` (short text), `description` (long text) and `depends_on` (indices of earlier steps).
+
 ## 0.4.0 (2026-10-02)
 
 The request bodies of the broker's approvals API (ADR 0009, PR5b-2). Additive; nothing existing changes.

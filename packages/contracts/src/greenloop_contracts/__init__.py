@@ -35,6 +35,7 @@ from greenloop_contracts.memory_record import (
     Provenance,
 )
 from greenloop_contracts.operation import canonical_operation, operation_hash
+from greenloop_contracts.plan import MAX_PLAN_STEPS, Plan, PlanStatus, PlanStep
 from greenloop_contracts.registry import (
     CONTRACTS,
     UnknownContractError,
@@ -51,6 +52,7 @@ __all__ = [
     "DEFAULT_APPROVAL_TTL",
     "DENIAL_CODES",
     "MAX_APPROVAL_TTL",
+    "MAX_PLAN_STEPS",
     "MAX_TIMEOUT_MS",
     "ActorKind",
     "Agent",
@@ -79,6 +81,9 @@ __all__ = [
     "MemoryRecord",
     "MemoryScope",
     "MemorySource",
+    "Plan",
+    "PlanStatus",
+    "PlanStep",
     "Provenance",
     "Task",
     "TaskStatus",

@@ -1,6 +1,6 @@
 # ADR 0010: The web app proxies the orchestrator and holds the token in a cookie
 
-- Status: Accepted; implemented on feature/web-chat (Phase 2 web chat UI)
+- Status: Accepted; implemented on feature/web-chat (Phase 2 web chat UI). Decision 1 (token paste) is superseded by [ADR 0012](0012-web-sign-in.md): the cookie now holds a server-side session token.
 - Date: 2026-10-04
 
 ## Context

@@ -41,6 +41,11 @@ BEGIN
 END
 $bootstrap$;
 
+-- pgvector for memory retrieval (ADR 0011). Creating an extension needs a superuser,
+-- so it lives here rather than in a migration; it stays owned by the superuser, and
+-- the ownership transfer and startup checks skip extension members.
+CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
+
 -- The orchestrator owns public and runs its own migrations there.
 ALTER SCHEMA public OWNER TO greenloop_orchestrator;
 REVOKE ALL ON SCHEMA public FROM PUBLIC;

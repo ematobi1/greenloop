@@ -35,13 +35,22 @@ from app.conversations.store import (
 )
 from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError, error_body
-from app.db.models import MessageRow
+from app.db.models import MessageRow, MessageStatus
 from app.db.session import get_session
+from app.memory.indexing import index_committed
+from app.memory.provenance import remember_source_ref
+from app.memory.store import MemoryAlreadyRememberedError, MemoryStore
+from greenloop_contracts import (
+    MemoryCategory,
+    MemoryRecord,
+    MemorySource,
+)
 
 router = APIRouter(prefix="/conversations", tags=["chat"])
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 ConversationId = Annotated[str, Path(max_length=128)]
+MessageId = Annotated[str, Path(max_length=128)]
 DbSession = Annotated[Session, Depends(get_session)]
 
 
@@ -90,6 +99,18 @@ class MessageOut(BaseModel):
     created_at: datetime
 
 
+class RememberCreate(BaseModel):
+    """Save a chat message as memory. `content` lets the user keep only part of it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    content: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=20000)]
+        | None
+    ) = None
+    category: MemoryCategory = MemoryCategory.USER_CONTEXT
+
+
 class ConversationPage(BaseModel):
     data: list[ConversationOut]
     meta: PageMeta
@@ -114,7 +135,11 @@ def _engine(request: Request) -> ChatEngine:
     if state.session_factory is None:
         raise ApiError(503, "DATABASE_UNAVAILABLE", "The database is not configured.")
     return ChatEngine(
-        state.session_factory, state.provider_registry, state.redactor, state.settings
+        state.session_factory,
+        state.provider_registry,
+        state.redactor,
+        state.settings,
+        embedder=state.embedder,
     )
 
 
@@ -198,6 +223,7 @@ async def send_message(
             "Request validation failed.",
             fields={"content": f"At most {settings.ai_max_message_chars} characters."},
         )
+    query_vector = await engine.embed_query(body.content)
     try:
         turn = await asyncio.to_thread(
             engine.prepare,
@@ -206,6 +232,7 @@ async def send_message(
             body.content,
             request.state.correlation_id,
             body.provider,
+            query_vector,
         )
     except ConversationNotFoundError:
         raise _not_found() from None
@@ -289,3 +316,61 @@ async def _event_stream(engine: ChatEngine, turn: PreparedTurn) -> AsyncIterator
                 )
     finally:
         await events.aclose()
+
+
+@router.post("/{conversation_id}/messages/{message_id}/remember", status_code=201)
+def remember_message(
+    conversation_id: ConversationId,
+    message_id: MessageId,
+    body: RememberCreate,
+    request: Request,
+    principal: CurrentPrincipal,
+    store: Store,
+    session: DbSession,
+) -> MemoryRecord:
+    """Explicit "remember this": the user, not the model, decides what becomes memory.
+
+    The record is the principal's own, private and unverified; its source is user or agent
+    by who wrote the message, and source_ref points at the conversation and message.
+    """
+    try:
+        message = store.message(conversation_id, message_id)
+    except ConversationNotFoundError:
+        raise ApiError(404, "MESSAGE_NOT_FOUND", "Message not found.") from None
+    if message.status != MessageStatus.COMPLETE.value or (
+        message.role == "user" and not store.is_answered(message)
+    ):
+        # A message whose turn was refused or failed is kept out of later prompts; saving
+        # it as memory would bring it back into every one of them.
+        raise ApiError(
+            422,
+            "MESSAGE_INCOMPLETE",
+            "Only a complete message that got a reply can be saved as memory.",
+        )
+    content = body.content or message.content.strip()
+    if not content or len(content) > 20000 or content not in message.content:
+        # The record cites this message, so it may only keep text the message contains.
+        raise ApiError(
+            422,
+            "VALIDATION_FAILED",
+            "Request validation failed.",
+            fields={"content": "Choose 1 to 20000 characters of the message to remember."},
+        )
+    memory = MemoryStore(session, request.state.correlation_id)
+    try:
+        record = memory.remember(
+            principal.principal_id,
+            remember_source_ref(conversation_id, message_id),
+            content,
+            # The user chose to keep it, but a reply was written by the model: never let
+            # model output pass as something the user said.
+            MemorySource.USER if message.role == "user" else MemorySource.AGENT,
+            body.category,
+        )
+    except MemoryAlreadyRememberedError:
+        raise ApiError(
+            409, "ALREADY_REMEMBERED", "This message is already saved as memory."
+        ) from None
+    session.commit()
+    index_committed(session, request.app.state.embedder, record)
+    return record

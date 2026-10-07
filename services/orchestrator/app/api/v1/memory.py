@@ -13,6 +13,7 @@ from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, Path, Query, Request, Response
 from pydantic import (
+    AfterValidator,
     BaseModel,
     ConfigDict,
     Field,
@@ -27,6 +28,7 @@ from app.core.auth import CurrentPrincipal
 from app.core.errors import ApiError
 from app.db.session import get_session
 from app.memory import provenance
+from app.memory.indexing import index_committed
 from app.memory.store import (
     MemoryConflictError,
     MemoryNotFoundError,
@@ -47,7 +49,17 @@ from greenloop_contracts.base import Identifier, UtcDatetime
 router = APIRouter(prefix="/memory-records", tags=["memory"])
 
 Content = Annotated[str, StringConstraints(min_length=1, max_length=20000)]
-SourceRef = Annotated[str, StringConstraints(min_length=1, max_length=500)]
+
+
+def _not_reserved(source_ref: str) -> str:
+    if source_ref.startswith(provenance.REMEMBER_PREFIX):
+        raise ValueError("source refs starting with 'conversation:' are set by the server")
+    return source_ref
+
+
+SourceRef = Annotated[
+    str, StringConstraints(min_length=1, max_length=500), AfterValidator(_not_reserved)
+]
 Tags = Annotated[tuple[Identifier, ...], Field(max_length=32)]
 RecordId = Annotated[str, Path(max_length=128)]
 
@@ -144,7 +156,11 @@ def list_memory_records(
 
 @router.post("", status_code=201)
 def create_memory_record(
-    body: MemoryRecordCreate, principal: CurrentPrincipal, store: Store, session: DbSession
+    body: MemoryRecordCreate,
+    principal: CurrentPrincipal,
+    store: Store,
+    session: DbSession,
+    request: Request,
 ) -> MemoryRecord:
     try:
         record = MemoryRecord(
@@ -176,6 +192,7 @@ def create_memory_record(
             fields={"scope": "Shared scope is disabled until a sharing policy exists."},
         ) from None
     session.commit()
+    index_committed(session, request.app.state.embedder, record)
     return record
 
 
@@ -208,6 +225,7 @@ def create_memory_revision(
     principal: CurrentPrincipal,
     store: Store,
     session: DbSession,
+    request: Request,
 ) -> MemoryRecord:
     if body.confidence == "verified" and not principal.is_system:
         raise ApiError(
@@ -244,6 +262,7 @@ def create_memory_revision(
     except ValidationError as err:
         raise _invalid(err) from None
     session.commit()
+    index_committed(session, request.app.state.embedder, revision)
     return revision
 
 

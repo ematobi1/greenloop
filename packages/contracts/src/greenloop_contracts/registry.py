@@ -22,6 +22,7 @@ from greenloop_contracts.error_report import ErrorReport
 from greenloop_contracts.event import Event
 from greenloop_contracts.execution_result import ExecutionResult
 from greenloop_contracts.memory_record import MemoryRecord
+from greenloop_contracts.plan import Plan, PlanStep
 from greenloop_contracts.task import Task
 from greenloop_contracts.tool_grant import ToolGrant
 from greenloop_contracts.tool_permission import ToolPermission
@@ -32,6 +33,8 @@ CONTRACTS: Mapping[str, type[ContractModel]] = MappingProxyType(
         for model in (
             Agent,
             Task,
+            Plan,
+            PlanStep,
             Dispatch,
             ToolPermission,
             ToolGrant,
