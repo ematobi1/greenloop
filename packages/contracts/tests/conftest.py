@@ -36,6 +36,16 @@ def valid_payloads() -> dict[str, dict[str, Any]]:
             "created_at": T0,
             "updated_at": T0,
         },
+        "Plan": {
+            "plan_id": "plan-1",
+            "principal_id": "user-1",
+            "goal": "Move the blog to a static site",
+            "steps": [{"title": "Export posts"}, {"title": "Publish", "depends_on": [0]}],
+            "conversation_id": "conv-1",
+            "created_at": T0,
+            "updated_at": T0,
+        },
+        "PlanStep": {"title": "Export posts", "description": "All of them.", "depends_on": []},
         "Dispatch": {
             "dispatch_id": "dispatch-1",
             "task_id": "task-1",

@@ -257,3 +257,54 @@ a {
     flex-shrink: 0;
   }
 }
+
+.message__remember {
+  align-self: flex-start;
+  padding: var(--space-1) var(--space-2);
+  font-size: 0.875rem;
+}
+
+.chat__notice {
+  min-height: 1.5em;
+  color: var(--muted);
+}
+
+.memory,
+.memory__list,
+.memory__history {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.memory__list,
+.memory__history {
+  list-style: none;
+}
+
+.memory__search,
+.memory__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.memory__history {
+  padding-left: var(--space-3);
+  border-left: 2px solid var(--border);
+}
+
+.plan,
+.plan__steps {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.plan__steps {
+  padding-left: var(--space-4);
+}
+
+.plan__title {
+  font-weight: 600;
+}

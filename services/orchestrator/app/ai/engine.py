@@ -40,6 +40,8 @@ from app.core.config import Settings
 from app.core.redaction import Redactor
 from app.db.models import MessageRole, MessageRow, MessageStatus
 from app.memory import retrieval
+from app.memory.embeddings import Embedder
+from app.memory.indexing import embed_query
 from greenloop_contracts import AuditOutcome, AuditRecord
 
 logger = structlog.get_logger(__name__)
@@ -99,12 +101,18 @@ class ChatEngine:
         registry: ProviderRegistry,
         redactor: Redactor,
         settings: Settings,
+        embedder: Embedder | None = None,
     ) -> None:
+        self._embedder = embedder
         self._session_factory = session_factory
         self._registry = registry
         self._redactor = redactor
         self._settings = settings
         self._started: set[str] = set()
+
+    async def embed_query(self, content: str) -> list[float] | None:
+        """The vector for ranking memory against this message, or None (recency only)."""
+        return await embed_query(self._embedder, content)
 
     def prepare(
         self,
@@ -113,6 +121,7 @@ class ChatEngine:
         content: str,
         correlation_id: str,
         provider_name: str | None = None,
+        query_vector: list[float] | None = None,
     ) -> PreparedTurn:
         """Take the turn lease, build the request and store the user message. Raises
         AiError, ConversationNotFoundError or ConversationBusyError; nothing is stored
@@ -134,6 +143,8 @@ class ChatEngine:
                 content,
                 limit=settings.ai_memory_record_limit,
                 correlation_id=correlation_id,
+                query_vector=query_vector,
+                model=self._embedder.model if self._embedder is not None else None,
             )
             assembled = build_turn_request(
                 records,

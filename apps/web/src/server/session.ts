@@ -1,4 +1,4 @@
-// The API token lives only in this cookie. httpOnly keeps it from page scripts, Secure
+// The web session token (from username and password sign-in, ADR 0012) lives only in this cookie. httpOnly keeps it from page scripts, Secure
 // and the __Host- prefix keep it on this origin over a secure context (browsers treat
 // localhost and 127.0.0.1 as secure), SameSite=Strict keeps it off cross-site requests.
 // Max-Age, not a session cookie: browsers restore session cookies with the session.
@@ -13,9 +13,11 @@ export function isPlausibleToken(token: unknown): token is string {
   return typeof token === "string" && TOKEN_PATTERN.test(token) && !UNSAFE_IN_COOKIE.test(token);
 }
 
-export function sessionCookie(token: string): string {
+// maxAgeSeconds lets the cookie end no later than the server-side session does.
+export function sessionCookie(token: string, maxAgeSeconds = SESSION_MAX_AGE_SECONDS): string {
   if (!isPlausibleToken(token)) throw new Error("Refusing to store a malformed token.");
-  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${SESSION_MAX_AGE_SECONDS}; HttpOnly; Secure; SameSite=Strict`;
+  const maxAge = Math.max(0, Math.min(SESSION_MAX_AGE_SECONDS, Math.floor(maxAgeSeconds)));
+  return `${SESSION_COOKIE}=${token}; Path=/; Max-Age=${maxAge}; HttpOnly; Secure; SameSite=Strict`;
 }
 
 export function clearedSessionCookie(): string {

@@ -24,6 +24,14 @@ class _Unset:
 _UNSET = _Unset()
 
 
+REMEMBER_PREFIX = "conversation:"
+
+
+def remember_source_ref(conversation_id: str, message_id: str) -> str:
+    """The source_ref "remember this" writes. Clients can't set it (reserved prefix)."""
+    return f"{REMEMBER_PREFIX}{conversation_id}/message:{message_id}"
+
+
 def new_record_id() -> str:
     return f"mem-{uuid.uuid4().hex}"
 
@@ -62,12 +70,19 @@ def _successor(
     )
 
 
+def _carried(original: MemoryRecord, source_ref: str | None) -> str | None:
+    """A revision keeps where the memory came from unless the caller names a new source.
+    `source` is carried the same way, so editing a model reply or a tool result never
+    relabels it as something the user said; `created_by` records who made the edit."""
+    return source_ref if source_ref is not None else original.provenance.source_ref
+
+
 def supersede(
     original: MemoryRecord,
     new_content: str,
     actor_id: str,
     *,
-    source: MemorySource = MemorySource.USER,
+    source: MemorySource | None = None,
     source_ref: str | None = None,
     category: MemoryCategory | None = None,
     confidence: MemoryConfidence = MemoryConfidence.UNVERIFIED,
@@ -80,8 +95,8 @@ def supersede(
         content=new_content,
         confidence=confidence,
         actor_id=actor_id,
-        source=source,
-        source_ref=source_ref,
+        source=source or original.provenance.source,
+        source_ref=_carried(original, source_ref),
         category=category,
         tags=tags,
         expires_at=expires_at,
@@ -93,7 +108,7 @@ def correct(
     corrected_content: str,
     actor_id: str,
     *,
-    source: MemorySource = MemorySource.USER,
+    source: MemorySource | None = None,
     source_ref: str | None = None,
 ) -> MemoryRecord:
     return _successor(
@@ -102,8 +117,8 @@ def correct(
         content=corrected_content,
         confidence=MemoryConfidence.CORRECTED,
         actor_id=actor_id,
-        source=source,
-        source_ref=source_ref,
+        source=source or original.provenance.source,
+        source_ref=_carried(original, source_ref),
         category=None,
         tags=None,
         expires_at=_UNSET,

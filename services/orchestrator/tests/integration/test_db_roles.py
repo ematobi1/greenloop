@@ -94,14 +94,19 @@ def test_each_role_owns_its_schema_and_searches_it(db_roles, connect, role, sche
 
 
 def test_every_object_in_public_is_owned_by_the_orchestrator_after_migrations(engine, db_roles):
+    # Extension members (pgvector's functions and types) stay with the superuser.
     with db_roles.admin_engine.connect() as connection:
         others = connection.execute(
             text(
                 "SELECT c.relname FROM pg_class c WHERE c.relnamespace = 'public'::regnamespace"
                 " AND c.relowner <> 'greenloop_orchestrator'::regrole"
+                " AND NOT EXISTS (SELECT FROM pg_depend d WHERE d.classid = 'pg_class'::regclass"
+                " AND d.objid = c.oid AND d.deptype = 'e')"
                 " UNION ALL SELECT p.proname FROM pg_proc p"
                 " WHERE p.pronamespace = 'public'::regnamespace"
                 " AND p.proowner <> 'greenloop_orchestrator'::regrole"
+                " AND NOT EXISTS (SELECT FROM pg_depend d WHERE d.classid = 'pg_proc'::regclass"
+                " AND d.objid = p.oid AND d.deptype = 'e')"
             )
         ).all()
     assert others == []

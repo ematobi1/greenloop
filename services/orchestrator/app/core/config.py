@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Literal
 from urllib.parse import urlsplit
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ENV_FILE_VARIABLE = "GREENLOOP_ENV_FILE"
@@ -58,6 +58,24 @@ class Settings(BaseSettings):
     ai_history_message_limit: int = Field(default=40, ge=0, le=500)
     ai_max_message_chars: int = Field(default=20000, ge=1, le=200000)
     ai_memory_record_limit: int = Field(default=20, ge=0, le=100)
+
+    # Memory embeddings (ADR 0011). "none" keeps retrieval on recency only; "fake" is
+    # deterministic and offline, for tests and evals, and is refused in prod.
+    embedding_provider: Literal["none", "ollama", "fake"] = "none"
+    embedding_base_url: str | None = None
+    embedding_model: str = Field(
+        default="nomic-embed-text", max_length=100, pattern=r"^[A-Za-z0-9._:/-]+$"
+    )
+
+    @model_validator(mode="after")
+    def _no_fake_embeddings_in_prod(self) -> "Settings":
+        if self.environment == "prod" and self.embedding_provider == "fake":
+            raise ValueError("EMBEDDING_PROVIDER=fake is for tests only")
+        return self
+
+    @property
+    def resolved_embedding_base_url(self) -> str:
+        return self.embedding_base_url or self.ollama_base_url
 
     def secret_values(self) -> list[str]:
         """Every configured secret value, for exact-match redaction."""

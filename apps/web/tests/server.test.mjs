@@ -191,3 +191,9 @@ test("a body whose upload fails reads as no body instead of throwing", async () 
   });
   assert.equal(await readJsonBody(broken, 1024), undefined);
 });
+
+test("the session cookie's Max-Age follows the session and is capped at 12 hours", () => {
+  assert.match(sessionCookie(TOKEN, 600), /; Max-Age=600;/);
+  assert.match(sessionCookie(TOKEN, 99_999_999), /; Max-Age=43200;/);
+  assert.match(sessionCookie(TOKEN, -5), /; Max-Age=0;/);
+});

@@ -6,12 +6,16 @@ append-only: database triggers reject UPDATE, DELETE and TRUNCATE (see migration
 Conversations are soft-deleted (deleted_at) and carry a turn lease (active_turn_id,
 turn_lease_expires_at) so one chat turn runs at a time; a trigger rejects UPDATE on messages.
 
+memory_embeddings holds one vector per (record, embedding model), kept apart from
+memory_records so adding or backfilling an embedding never updates a memory row.
+
 TODO(phase-4): jobs.
 """
 
 from datetime import UTC, datetime
 from enum import StrEnum
 
+from pgvector.sqlalchemy import Vector
 from sqlalchemy import (
     JSON,
     CheckConstraint,
@@ -39,6 +43,8 @@ from greenloop_contracts import (
     MemoryRecord,
     MemoryScope,
     MemorySource,
+    Plan,
+    PlanStatus,
     Provenance,
 )
 
@@ -109,6 +115,43 @@ class ApiTokenRow(TimestampMixin, Base):
     token_hash: Mapped[str] = mapped_column(String(64), unique=True)
     label: Mapped[str] = mapped_column(String(100))
     revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class UserCredentialRow(TimestampMixin, Base):
+    """Username and argon2id password hash for a principal that signs in to the web app."""
+
+    __tablename__ = "user_credentials"
+
+    principal_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("principals.principal_id"), primary_key=True
+    )
+    username: Mapped[str] = mapped_column(String(64), unique=True)
+    password_hash: Mapped[str] = mapped_column(String(255))
+    password_changed_at: Mapped[datetime] = mapped_column(UtcDateTime())
+
+
+class UserSessionRow(TimestampMixin, Base):
+    """A signed-in browser session. Only the token's SHA256 is stored."""
+
+    __tablename__ = "user_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(
+        String(128), ForeignKey("principals.principal_id"), index=True
+    )
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(UtcDateTime())
+    revoked_at: Mapped[datetime | None] = mapped_column(UtcDateTime())
+
+
+class LoginThrottleRow(TimestampMixin, Base):
+    """Failed sign-ins per username, known or not, so a lockout reveals nothing."""
+
+    __tablename__ = "login_throttle"
+
+    username: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failures: Mapped[int] = mapped_column(Integer, server_default="0")
+    locked_until: Mapped[datetime | None] = mapped_column(UtcDateTime())
 
 
 class AuditRecordRow(TimestampMixin, Base):
@@ -255,6 +298,29 @@ class MessageStatus(StrEnum):
     INCOMPLETE = "incomplete"
 
 
+EMBEDDING_DIMENSIONS = 768
+
+
+class MemoryEmbeddingRow(TimestampMixin, Base):
+    __tablename__ = "memory_embeddings"
+    __table_args__ = (
+        Index(
+            "ix_memory_embeddings_cosine",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+        ),
+    )
+
+    record_id: Mapped[str] = mapped_column(
+        String(128),
+        ForeignKey("memory_records.record_id", name="fk_memory_embeddings_record"),
+        primary_key=True,
+    )
+    model: Mapped[str] = mapped_column(String(100), primary_key=True)
+    embedding: Mapped[list[float]] = mapped_column(Vector(EMBEDDING_DIMENSIONS))
+
+
 class ConversationRow(TimestampMixin, Base):
     __tablename__ = "conversations"
     __table_args__ = (Index("ix_conversations_principal_updated", "principal_id", "updated_at"),)
@@ -292,3 +358,34 @@ class MessageRow(TimestampMixin, Base):
     input_tokens: Mapped[int | None] = mapped_column(Integer)
     output_tokens: Mapped[int | None] = mapped_column(Integer)
     correlation_id: Mapped[str] = mapped_column(String(128))
+
+
+class PlanRow(TimestampMixin, Base):
+    """A drafted plan (contracts Plan). Steps are stored as JSON and re-validated on read."""
+
+    __tablename__ = "plans"
+    __table_args__ = (
+        CheckConstraint(_in("status", PlanStatus), name="ck_plans_status"),
+        Index("ix_plans_principal_created", "principal_id", "created_at"),
+    )
+
+    plan_id: Mapped[str] = mapped_column(String(128), primary_key=True)
+    principal_id: Mapped[str] = mapped_column(String(128), ForeignKey("principals.principal_id"))
+    conversation_id: Mapped[str | None] = mapped_column(
+        String(128), ForeignKey("conversations.conversation_id")
+    )
+    goal: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(16))
+    steps: Mapped[list] = mapped_column(JSON)
+
+    def to_contract(self) -> Plan:
+        return Plan(
+            plan_id=self.plan_id,
+            principal_id=self.principal_id,
+            conversation_id=self.conversation_id,
+            goal=self.goal,
+            status=self.status,
+            steps=self.steps,
+            created_at=self.created_at,
+            updated_at=self.updated_at,
+        )

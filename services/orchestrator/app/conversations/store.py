@@ -104,6 +104,34 @@ class ConversationStore:
         ).all()
         return list(rows), total or 0
 
+    def message(self, conversation_id: str, message_id: str) -> MessageRow:
+        """One message of an owned, live conversation; anything else is not found."""
+        self.get(conversation_id)
+        row = self._session.scalars(
+            select(MessageRow).where(
+                MessageRow.conversation_id == conversation_id,
+                MessageRow.message_id == message_id,
+            )
+        ).one_or_none()
+        if row is None:
+            raise ConversationNotFoundError(conversation_id)
+        return row
+
+    def is_answered(self, message: MessageRow) -> bool:
+        """Whether a user message got a complete reply, the rule `history` uses to keep
+        refused or failed turns out of later prompts."""
+        reply = self._session.scalars(
+            select(MessageRow).where(
+                MessageRow.conversation_id == message.conversation_id,
+                MessageRow.sequence == message.sequence + 1,
+            )
+        ).one_or_none()
+        return (
+            reply is not None
+            and reply.role == MessageRole.ASSISTANT.value
+            and reply.status == MessageStatus.COMPLETE.value
+        )
+
     def history(self, conversation_id: str, limit: int) -> list[MessageRow]:
         """The newest `limit` messages from answered turns, oldest first.
 

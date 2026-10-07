@@ -54,12 +54,17 @@ async function send(path: string, init: RequestInit = {}): Promise<Response> {
   return response;
 }
 
-export async function signIn(token: string): Promise<void> {
-  await send("/api/session", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify({ token }) });
+export async function signIn(username: string, password: string): Promise<void> {
+  await send("/api/session", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ username, password }),
+  });
 }
 
-export async function signOut(): Promise<void> {
-  await send("/api/session", { method: "DELETE" });
+// `everywhere` also ends the user's sessions on every other device.
+export async function signOut(everywhere = false): Promise<void> {
+  await send(everywhere ? "/api/session?scope=all" : "/api/session", { method: "DELETE" });
 }
 
 type Page<T> = { data: T[]; meta: { total: number; limit: number; offset: number } };
@@ -84,6 +89,12 @@ export async function listMessages(conversationId: string): Promise<{ messages: 
     page = await (await send(`${path}?offset=${offset}`)).json();
   }
   return { messages: page.data, hidden: page.meta.offset };
+}
+
+// "Remember this": saves one message as private, unverified memory.
+export async function rememberMessage(conversationId: string, messageId: string): Promise<void> {
+  const path = `/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}/remember`;
+  await send(path, { method: "POST", headers: JSON_HEADERS, body: "{}" });
 }
 
 export type StreamHandlers = {
@@ -140,4 +151,55 @@ export async function streamMessage(
   }
   parser.end();
   if (!finished) handlers.onError({ status: 0, code: "NETWORK", message: "" }, null);
+}
+
+// Mirrors MemoryRecord in packages/contracts (memory_record.py).
+export type MemoryRecord = {
+  record_id: string;
+  category: string;
+  confidence: string;
+  content: string;
+  created_at: string;
+  provenance: { source: string; source_ref: string | null; operation: string; supersedes: string | null };
+};
+
+export async function listMemory(query = "", offset = 0): Promise<{ records: MemoryRecord[]; total: number }> {
+  const params = new URLSearchParams({ offset: String(offset) });
+  if (query.trim()) params.set("q", query.trim());
+  const page: Page<MemoryRecord> = await (await send(`/api/memory?${params}`)).json();
+  return { records: page.data, total: page.meta.total };
+}
+
+export async function memoryHistory(recordId: string): Promise<MemoryRecord[]> {
+  return (await (await send(`/api/memory/${encodeURIComponent(recordId)}/history`)).json()).data;
+}
+
+export async function reviseMemory(
+  recordId: string,
+  operation: "correct" | "supersede",
+  content: string,
+): Promise<MemoryRecord> {
+  const response = await send(`/api/memory/${encodeURIComponent(recordId)}/revisions`, {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ operation, content }),
+  });
+  return response.json();
+}
+
+export async function deleteMemory(recordId: string): Promise<void> {
+  await send(`/api/memory/${encodeURIComponent(recordId)}`, { method: "DELETE" });
+}
+
+// Mirrors Plan and PlanStep in packages/contracts (plan.py).
+export type PlanStep = { title: string; description: string; depends_on: number[] };
+export type Plan = { plan_id: string; goal: string; status: string; steps: PlanStep[]; conversation_id: string | null };
+
+export async function draftPlan(goal: string, conversationId?: string): Promise<Plan> {
+  const body = conversationId ? { goal, conversation_id: conversationId } : { goal };
+  return (await send("/api/plans", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(body) })).json();
+}
+
+export async function discardPlan(planId: string): Promise<void> {
+  await send(`/api/plans/${encodeURIComponent(planId)}`, { method: "DELETE" });
 }

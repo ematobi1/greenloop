@@ -10,6 +10,7 @@ from app.agents.registry import build_agent_registry
 from app.ai.providers.registry import build_registry
 from app.api.v1 import health
 from app.api.v1.router import router as v1_router
+from app.api.v1.sessions import SignInLimiter
 from app.core.config import Settings, get_settings
 from app.core.errors import ErrorEnvelope, register_error_handlers
 from app.core.logging import configure_logging
@@ -17,6 +18,7 @@ from app.core.middleware import install_request_middleware
 from app.core.redaction import Redactor
 from app.db.session import make_engine, make_session_factory
 from app.db.startup_check import verify_database
+from app.memory.embeddings import build_embedder
 from app.tools.broker_client import BrokerClient
 
 ERROR_RESPONSES = {
@@ -42,6 +44,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.redactor = redactor
     app.state.session_factory = make_session_factory(engine) if engine is not None else None
     app.state.provider_registry = build_registry(settings)
+    app.state.embedder = build_embedder(settings)
+    app.state.sign_in_limiter = SignInLimiter()
+    # One plan draft at a time per principal (each is a long, paid model call).
+    app.state.plans_drafting = set()
     app.state.agent_registry = build_agent_registry()
     app.state.broker_client = (
         BrokerClient(settings.broker_url, settings.broker_service_token.get_secret_value())

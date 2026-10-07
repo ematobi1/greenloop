@@ -33,6 +33,8 @@ from greenloop_contracts import (
     MemoryOperation,
     MemoryRecord,
     MemoryScope,
+    MemorySource,
+    Provenance,
 )
 
 
@@ -45,6 +47,10 @@ class MemoryConflictError(Exception):
 
 
 class MemorySharingUnavailableError(Exception):
+    pass
+
+
+class MemoryAlreadyRememberedError(Exception):
     pass
 
 
@@ -121,6 +127,65 @@ class MemoryStore:
             .offset(offset)
         )
         return [row.to_contract() for row in rows], total or 0
+
+    def remember(
+        self,
+        principal_id: str,
+        source_ref: str,
+        content: str,
+        source: MemorySource,
+        category: MemoryCategory,
+    ) -> MemoryRecord:
+        """Save one chat message as a private, unverified record citing `source_ref`.
+
+        Raises MemoryAlreadyRememberedError if a live record already cites it. Writers for
+        the same (principal, source_ref) are serialized, so concurrent saves store one.
+        """
+        self.lock_source_ref(principal_id, source_ref)
+        if self.live_by_source_ref(principal_id, source_ref) is not None:
+            raise MemoryAlreadyRememberedError(source_ref)
+        return self.create(
+            MemoryRecord(
+                record_id=provenance.new_record_id(),
+                principal_id=principal_id,
+                scope=MemoryScope.PRIVATE,
+                category=category,
+                content=content,
+                provenance=Provenance(
+                    source=source,
+                    source_ref=source_ref,
+                    created_by=principal_id,
+                    operation=MemoryOperation.CREATE,
+                ),
+                created_at=datetime.now(UTC),
+            )
+        )
+
+    def lock_source_ref(self, principal_id: str, source_ref: str) -> None:
+        """Serialize writers for one (principal, source_ref) until this transaction ends, so
+        two concurrent "remember" calls can't both pass the duplicate check. Postgres only;
+        a no-op elsewhere."""
+        if self._session.get_bind().dialect.name != "postgresql":
+            return
+        self._session.execute(
+            select(
+                func.pg_advisory_xact_lock(func.hashtextextended(f"{principal_id}|{source_ref}", 0))
+            )
+        )
+
+    def live_by_source_ref(self, principal_id: str, source_ref: str) -> MemoryRecord | None:
+        """The principal's live record whose latest version cites `source_ref`, if any."""
+        row = self._session.scalars(
+            self._owned(principal_id)
+            .where(
+                MemoryRecordRow.source_ref == source_ref,
+                MemoryRecordRow.operation != MemoryOperation.DELETE.value,
+                _has_no_successor,
+                _not_expired(datetime.now(UTC)),
+            )
+            .limit(1)
+        ).one_or_none()
+        return row.to_contract() if row is not None else None
 
     def revise(
         self,
