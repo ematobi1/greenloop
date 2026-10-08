@@ -69,13 +69,16 @@ export const CORE_COLOURS: Record<CoreState, number> = {
   error: 0xffc15a,
 };
 
-export type MotionContext = { reducedMotion: boolean; hidden: boolean };
+export type MotionContext = { reducedMotion: boolean; hidden: boolean; narrow?: boolean };
 
-// Reduced motion renders one still frame; a hidden tab renders nothing at all.
-export function renderMode({ reducedMotion, hidden }: MotionContext): "animate" | "still" | "paused" {
+// Reduced motion, and phone widths (battery), render one still frame; a hidden tab
+// renders nothing at all.
+export function renderMode({ reducedMotion, hidden, narrow = false }: MotionContext): "animate" | "still" | "paused" {
   if (hidden) return "paused";
-  return reducedMotion ? "still" : "animate";
+  return reducedMotion || narrow ? "still" : "animate";
 }
+
+export const NARROW_QUERY = "(max-width: 767px)";
 
 // Intensity of the core glow at time t (seconds) for a state; `burst` is 0..1 and decays
 // after each streamed delta.

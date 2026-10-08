@@ -62,11 +62,12 @@ test("derived nodes say what they really check", () => {
   assert.equal(nodeStatusText(GLOBE_NODES[3], "ok"), "Agents: up (registry reachable)");
 });
 
-test("reduced motion renders a still frame and a hidden tab renders nothing", () => {
+test("reduced motion and phone widths render a still frame, and a hidden tab renders nothing", () => {
   assert.equal(renderMode({ reducedMotion: false, hidden: false }), "animate");
   assert.equal(renderMode({ reducedMotion: true, hidden: false }), "still");
   assert.equal(renderMode({ reducedMotion: true, hidden: true }), "paused");
   assert.equal(renderMode({ reducedMotion: false, hidden: true }), "paused");
+  assert.equal(renderMode({ reducedMotion: false, hidden: false, narrow: true }), "still");
 });
 
 test("three.js is loaded lazily and only by the globe", () => {

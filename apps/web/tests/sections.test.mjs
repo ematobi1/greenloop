@@ -57,6 +57,8 @@ test("the shell builds its tabs and rail from SECTIONS", () => {
 });
 
 test("signed-in pages sit behind a cookie check and / goes to /chat", () => {
-  assert.ok(readFileSync(join(appDir, "layout.tsx"), "utf8").includes('redirect("/sign-in")'));
+  const layout = readFileSync(join(appDir, "layout.tsx"), "utf8");
+  assert.ok(layout.includes("jar.has(SESSION_COOKIE)"));
+  assert.ok(layout.includes('"/sign-in?expired=1" : "/sign-in"'));
   assert.ok(readFileSync(join(appDir, "..", "page.tsx"), "utf8").includes('redirect("/chat")'));
 });

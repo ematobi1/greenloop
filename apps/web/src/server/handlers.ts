@@ -6,7 +6,7 @@ import type { ServerConfig } from "./config.ts";
 import { BODY_TOO_LARGE, readJsonBody, rejectCrossSite, rejectNonJson } from "./guard.ts";
 import { emptyResponse, errorResponse, jsonResponse } from "./http.ts";
 import { callOrchestrator, relayError, type Upstream, UpstreamFailure } from "./orchestrator.ts";
-import { clearedSessionCookie, isPlausibleToken, readSessionToken, sessionCookie } from "./session.ts";
+import { clearedSessionCookie, isPlausibleToken, readSessionToken, sessionCookie, sessionEndedCookie } from "./session.ts";
 
 export type Deps = Upstream & { config: ServerConfig };
 
@@ -31,6 +31,14 @@ function signedOut(): Response {
   return errorResponse(401, "SIGNED_OUT", "Sign in to continue.", {
     "Set-Cookie": clearedSessionCookie(),
   });
+}
+
+// The orchestrator rejected the session: clear it and leave the "session ended" marker.
+function sessionRejected(): Response {
+  const headers = new Headers();
+  headers.append("Set-Cookie", clearedSessionCookie());
+  headers.append("Set-Cookie", sessionEndedCookie());
+  return errorResponse(401, "UNAUTHENTICATED", "Your session has ended. Sign in again.", headers);
 }
 
 function tooLarge(): Response {
@@ -96,7 +104,7 @@ export async function signIn(request: Request, deps: Deps): Promise<Response> {
     if (error instanceof UpstreamFailure) return error.response;
     throw error;
   }
-  if (!response.ok) return relayError(response);
+  if (!response.ok) return relayError(response, false);
   const session = (await response.json().catch(() => null)) as { session_token?: unknown; expires_at?: unknown } | null;
   const expiresAt = typeof session?.expires_at === "string" ? Date.parse(session.expires_at) : NaN;
   const lifetimeSeconds = (expiresAt - Date.now()) / 1000;
@@ -474,7 +482,7 @@ export async function overview(request: Request, deps: Deps): Promise<Response> 
   if (!token) return signedOut();
   const names = Object.keys(OVERVIEW_SOURCES);
   const results = await Promise.all(names.map((name) => countFrom(deps, token, OVERVIEW_SOURCES[name], request.signal)));
-  if (results.includes("signed-out")) return signedOut();
+  if (results.includes("signed-out")) return sessionRejected();
   return jsonResponse({
     tiles: Object.fromEntries(names.map((name, index) => [name, results[index]])),
     updated_at: new Date().toISOString(),

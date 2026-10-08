@@ -638,3 +638,17 @@ test("health and overview need a session", async () => {
   assert.equal((await overview(request("/api/overview", { signedIn: false }), deps)).status, 401);
   assert.equal(calls.length, 0);
 });
+
+test("a wrong password sets no cookie at all, but an ended session leaves the marker", async () => {
+  const wrong = await signIn(
+    request("/api/session", { method: "POST", body: { username: "alice", password: "nope" }, signedIn: false }),
+    upstream(apiError(401, "INVALID_CREDENTIALS")).deps,
+  );
+  assert.deepEqual(wrong.headers.getSetCookie(), []);
+  const { deps } = routed(() => apiError(401, "UNAUTHENTICATED"));
+  const ended = await overview(request("/api/overview"), deps);
+  const cookies = ended.headers.getSetCookie();
+  assert.equal(ended.status, 401);
+  assert.ok(cookies.some((cookie) => cookie.startsWith("__Host-greenloop_session=;")));
+  assert.ok(cookies.some((cookie) => cookie.startsWith("__Host-greenloop_session_ended=1;")));
+});

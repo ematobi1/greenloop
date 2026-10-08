@@ -7,6 +7,7 @@ import {
   FRAME_BUDGET_MS,
   GLOBE_NODES,
   LEVEL_COLOURS,
+  NARROW_QUERY,
   coreIntensity,
   nodeLevel,
   nodeStatusText,
@@ -19,6 +20,7 @@ import type { Health } from "@/lib/hud";
 type Mode = "loading" | "ready" | "fallback";
 
 const ORBIT_RADIUS = 1.65;
+const LABEL_MARGIN = 64;
 const TILT = 0.38;
 
 function orbitPosition(index: number, angle: number): [number, number, number] {
@@ -210,7 +212,8 @@ function mountGlobe(
       projected.copy(mesh.position).project(camera);
       const label = labels.current[index];
       if (label) {
-        const x = ((projected.x + 1) / 2) * width;
+        // Keep labels inside the panel on narrow screens.
+        const x = Math.min(Math.max(((projected.x + 1) / 2) * width, LABEL_MARGIN), width - LABEL_MARGIN);
         const y = ((1 - projected.y) / 2) * height;
         label.style.transform = `translate(${Math.round(x)}px, ${Math.round(y)}px)`;
       }
@@ -221,7 +224,9 @@ function mountGlobe(
   };
 
   const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-  const mode = () => renderMode({ reducedMotion: motionQuery.matches, hidden: document.hidden });
+  const narrowQuery = window.matchMedia(NARROW_QUERY);
+  const mode = () =>
+    renderMode({ reducedMotion: motionQuery.matches, hidden: document.hidden, narrow: narrowQuery.matches });
 
   const tick = (time: number) => {
     frame = requestAnimationFrame(tick);
@@ -279,6 +284,7 @@ function mountGlobe(
   window.addEventListener("pointerup", up);
   document.addEventListener("visibilitychange", apply);
   motionQuery.addEventListener("change", apply);
+  narrowQuery.addEventListener("change", apply);
   apply();
 
   return () => {
@@ -289,6 +295,7 @@ function mountGlobe(
     window.removeEventListener("pointerup", up);
     document.removeEventListener("visibilitychange", apply);
     motionQuery.removeEventListener("change", apply);
+    narrowQuery.removeEventListener("change", apply);
     live.current.redraw = () => undefined;
     disposables.forEach((item) => item.dispose());
     renderer.dispose();

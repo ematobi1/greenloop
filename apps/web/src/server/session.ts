@@ -24,6 +24,14 @@ export function clearedSessionCookie(): string {
   return `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`;
 }
 
+// Set alongside the cleared session cookie when the orchestrator rejects a session, so the
+// next page load can say "your session has ended" instead of a bare sign-in. Holds no secret.
+export const SESSION_ENDED_COOKIE = "__Host-greenloop_session_ended";
+
+export function sessionEndedCookie(): string {
+  return `${SESSION_ENDED_COOKIE}=1; Path=/; Max-Age=120; HttpOnly; Secure; SameSite=Strict`;
+}
+
 export function readSessionToken(request: Request): string | null {
   const header = request.headers.get("cookie");
   if (!header) return null;
