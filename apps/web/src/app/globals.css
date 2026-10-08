@@ -488,3 +488,118 @@ a {
 .plan__title {
   font-weight: 600;
 }
+
+/* Globe */
+
+.hud-globe {
+  position: relative;
+  min-height: 22rem;
+  overflow: hidden;
+}
+
+.hud-globe__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  touch-action: pan-y;
+}
+
+.hud-globe--fallback .hud-globe__canvas,
+.hud-globe--loading .hud-globe__canvas {
+  visibility: hidden;
+}
+
+.hud-globe__still {
+  position: absolute;
+  top: 18%;
+  left: 50%;
+  width: min(16rem, 55%);
+  aspect-ratio: 1;
+  transform: translateX(-50%);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 40% 35%, rgba(159, 240, 255, 0.55), transparent 35%),
+    radial-gradient(circle, rgba(61, 214, 255, 0.35), rgba(10, 22, 44, 0.2) 65%, transparent 72%);
+  box-shadow: var(--hud-glow-strong);
+}
+
+.hud-globe__nodes {
+  position: absolute;
+  inset: 0;
+  list-style: none;
+  pointer-events: none;
+}
+
+.hud-node {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  grid-template-columns: auto auto;
+  column-gap: var(--hud-space-1);
+  align-items: center;
+  padding: var(--hud-space-1) var(--hud-space-2);
+  border: 1px solid var(--hud-border);
+  border-radius: var(--hud-radius);
+  background: rgba(2, 8, 20, 0.75);
+  color: var(--hud-text);
+  font: inherit;
+  text-align: left;
+  pointer-events: auto;
+  cursor: pointer;
+  translate: -50% -130%;
+}
+
+.hud-globe--ready .hud-node {
+  will-change: transform;
+}
+
+.hud-node__dot {
+  grid-row: span 2;
+  width: 0.6rem;
+  height: 0.6rem;
+  border-radius: 50%;
+  background: var(--hud-unknown);
+}
+
+.hud-node--ok .hud-node__dot {
+  background: var(--hud-ok);
+  box-shadow: 0 0 0.5rem var(--hud-ok);
+}
+
+.hud-node--warn {
+  border-color: var(--hud-warn);
+}
+
+.hud-node--warn .hud-node__dot {
+  background: var(--hud-warn);
+  box-shadow: 0 0 0.5rem var(--hud-warn);
+}
+
+.hud-node__label {
+  font-family: var(--hud-font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+}
+
+.hud-node__basis {
+  font-size: 0.65rem;
+  color: var(--hud-text-muted);
+}
+
+.hud-node[aria-pressed="true"] {
+  border-color: var(--hud-accent);
+  box-shadow: var(--hud-glow);
+}
+
+.hud-globe__detail {
+  position: absolute;
+  right: var(--hud-space-3);
+  bottom: var(--hud-space-2);
+  left: var(--hud-space-3);
+  min-height: 1.5em;
+  color: var(--hud-text-muted);
+  font-size: 0.85rem;
+  text-align: center;
+}
