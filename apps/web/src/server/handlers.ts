@@ -438,3 +438,79 @@ export async function discardPlan(request: Request, planId: string, deps: Deps):
   if (!response.ok) return relayError(response);
   return emptyResponse(204);
 }
+
+// Counts for the HUD's KPI tiles, from the orchestrator's own list endpoints only. A tile
+// whose source fails, or doesn't exist yet, gets value null and a note; never a guess.
+type Tile = { value: number | null; note: string | null };
+
+const OVERVIEW_SOURCES: Record<string, string> = {
+  conversations: "/v1/conversations?limit=1",
+  memories: "/v1/memory-records?limit=1",
+  plan_drafts: "/v1/plans?status=draft&limit=1",
+  pending_approvals: "/v1/approvals?status=pending&limit=1",
+  agents: "/v1/agents?limit=1",
+};
+
+async function countFrom(deps: Deps, token: string, path: string, signal: AbortSignal): Promise<Tile | "signed-out"> {
+  try {
+    const response = await callOrchestrator(deps, { method: "GET", path, token, signal });
+    if (response.status === 401) return "signed-out";
+    if (!response.ok) {
+      void response.body?.cancel().catch(() => undefined);
+      return { value: null, note: "Unavailable right now" };
+    }
+    const total = ((await response.json().catch(() => null)) as { meta?: { total?: unknown } } | null)?.meta?.total;
+    return Number.isInteger(total) && (total as number) >= 0
+      ? { value: total as number, note: null }
+      : { value: null, note: "Unavailable right now" };
+  } catch (error) {
+    if (error instanceof UpstreamFailure) return { value: null, note: "Unavailable right now" };
+    throw error;
+  }
+}
+
+export async function overview(request: Request, deps: Deps): Promise<Response> {
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  const names = Object.keys(OVERVIEW_SOURCES);
+  const results = await Promise.all(names.map((name) => countFrom(deps, token, OVERVIEW_SOURCES[name], request.signal)));
+  if (results.includes("signed-out")) return signedOut();
+  return jsonResponse({
+    tiles: Object.fromEntries(names.map((name, index) => [name, results[index]])),
+    updated_at: new Date().toISOString(),
+  });
+}
+
+// Health of the three services behind the web server, as statuses only. The orchestrator is
+// up if it answers its readiness check at all; broker and database come from that check.
+const HEALTH_STATUSES = new Set(["ok", "unavailable", "not_configured"]);
+
+export async function health(request: Request, deps: Deps): Promise<Response> {
+  if (!readSessionToken(request)) return signedOut();
+  let checks: Record<string, unknown> = {};
+  let orchestrator = "unavailable";
+  try {
+    const response = await callOrchestrator(deps, { method: "GET", path: "/v1/health", token: null, signal: request.signal, timeoutMs: 5000 });
+    if (response.status === 200 || response.status === 503) {
+      orchestrator = "ok";
+      checks = (((await response.json().catch(() => null)) as { checks?: Record<string, unknown> } | null)?.checks ?? {});
+    } else {
+      void response.body?.cancel().catch(() => undefined);
+    }
+  } catch (error) {
+    if (!(error instanceof UpstreamFailure)) throw error;
+  }
+  const status = (value: unknown) =>
+    orchestrator !== "ok" ? "unknown" : typeof value === "string" && HEALTH_STATUSES.has(value) ? value : "unknown";
+  const services = [
+    { name: "orchestrator", status: orchestrator },
+    { name: "broker", status: status(checks.broker) },
+    { name: "database", status: status(checks.database) },
+  ];
+  return jsonResponse({
+    services,
+    up: services.filter((service) => service.status === "ok").length,
+    total: services.length,
+    updated_at: new Date().toISOString(),
+  });
+}

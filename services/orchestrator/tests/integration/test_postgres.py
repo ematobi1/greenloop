@@ -84,7 +84,10 @@ def test_end_to_end_token_auth_and_audit_listing(pg_session_factory, principal_i
     app.state.session_factory = pg_session_factory
     client = TestClient(app)
 
-    assert client.get("/v1/health").json() == {"status": "ok", "checks": {"database": "ok"}}
+    assert client.get("/v1/health").json() == {
+        "status": "ok",
+        "checks": {"database": "ok", "broker": "not_configured"},
+    }
     assert client.get("/v1/audit-records").status_code == 401
     response = client.get("/v1/audit-records", headers={"Authorization": f"Bearer {token}"})
     assert response.status_code == 200

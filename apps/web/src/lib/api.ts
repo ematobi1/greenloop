@@ -212,3 +212,11 @@ export async function currentSession(): Promise<CurrentSession> {
 
 // Where an expired or revoked session goes: sign-in, with a note.
 export const EXPIRED_SIGN_IN = "/sign-in?expired=1";
+
+export async function overview(): Promise<import("./hud.ts").Overview> {
+  return (await send("/api/overview")).json();
+}
+
+export async function health(): Promise<import("./hud.ts").Health> {
+  return (await send("/api/health")).json();
+}

@@ -240,3 +240,16 @@ def test_the_draft_audit_records_provider_model_and_tokens(
         "input_tokens": 120,
         "output_tokens": 45,
     }
+
+
+def test_drafts_can_be_listed_on_their_own(client, auth, use_provider):
+    use_provider(FakeProvider([_json(GOOD)]))
+    keep = client.post("/v1/plans", headers=auth, json={"goal": "keep"}).json()["plan_id"]
+    use_provider(FakeProvider([_json(GOOD)]))
+    gone = client.post("/v1/plans", headers=auth, json={"goal": "gone"}).json()["plan_id"]
+    client.delete(f"/v1/plans/{gone}", headers=auth)
+    drafts = client.get("/v1/plans?status=draft", headers=auth).json()
+    assert [plan["plan_id"] for plan in drafts["data"]] == [keep]
+    assert drafts["meta"]["total"] == 1
+    assert client.get("/v1/plans", headers=auth).json()["meta"]["total"] == 2
+    assert client.get("/v1/plans?status=running", headers=auth).status_code == 422
