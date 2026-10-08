@@ -156,7 +156,8 @@ a {
 
 .hud-shell {
   display: grid;
-  grid-template-columns: 1fr;
+  /* minmax(0, …): the unscrolled tab row must not widen the page past the viewport. */
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto 1fr;
   min-height: 100vh;
 }
@@ -786,26 +787,28 @@ a {
 
 .hud-activity__item {
   display: grid;
-  grid-template-columns: 3.5rem 1fr;
+  grid-template-columns: 5rem 1fr;
   gap: var(--hud-space-2);
   overflow-wrap: anywhere;
 }
 
 .hud-activity__item time {
+  white-space: nowrap;
   color: var(--hud-accent);
   font-family: var(--hud-font-display);
   font-size: 0.75rem;
 }
 
+/* Fixed, not sticky: the page body hides horizontal overflow, which stops sticky working. */
 .hud-ask {
-  position: sticky;
+  position: fixed;
   bottom: var(--hud-space-2);
-  z-index: 5;
+  left: 50%;
+  z-index: 15;
   flex-direction: row;
   align-items: flex-end;
-  max-width: 52rem;
-  width: 100%;
-  margin: 0 auto;
+  width: min(52rem, calc(100% - 2 * var(--hud-space-3)));
+  transform: translateX(-50%);
   padding: var(--hud-space-2);
   border: 1px solid var(--hud-border-strong);
   border-radius: 2rem;

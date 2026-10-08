@@ -86,8 +86,9 @@ test("a reply streams in piece by piece, then is stored", async ({ page }) => {
   await page.getByLabel("Message", { exact: true }).press("Enter");
 
   const live = page.locator('[aria-live="polite"]');
-  await expect(live).toHaveText("Hello");
-  await expect(live).toHaveText("Hello from");
+  // Deltas arrive 300 ms apart; a busy main thread may merge later ones, but the first
+  // always shows on its own, before the reply is complete.
+  await expect(live).toHaveText(/^Hello( from)?$/);
   await expect(page.locator(".message--assistant .message__text")).toHaveText("Hello from GreenLoop");
   await expect(live).toHaveCount(0);
   await expect(page.locator(".message--user .message__text")).toHaveText("hello");

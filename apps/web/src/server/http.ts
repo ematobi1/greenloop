@@ -6,8 +6,11 @@ export type ErrorBody = {
 
 const NO_STORE = { "Cache-Control": "no-store" };
 
+// Headers objects keep repeated Set-Cookie values; spreading them into an object would not.
 export function jsonResponse(body: unknown, status = 200, headers: HeadersInit = {}): Response {
-  return Response.json(body, { status, headers: { ...NO_STORE, ...headers } });
+  const merged = new Headers(headers);
+  merged.set("Cache-Control", NO_STORE["Cache-Control"]);
+  return Response.json(body, { status, headers: merged });
 }
 
 export function errorResponse(
@@ -21,7 +24,9 @@ export function errorResponse(
 }
 
 export function emptyResponse(status: number, headers: HeadersInit = {}): Response {
-  return new Response(null, { status, headers: { ...NO_STORE, ...headers } });
+  const merged = new Headers(headers);
+  merged.set("Cache-Control", NO_STORE["Cache-Control"]);
+  return new Response(null, { status, headers: merged });
 }
 
 // Keeps only the documented error fields, as strings, so an upstream body can't smuggle

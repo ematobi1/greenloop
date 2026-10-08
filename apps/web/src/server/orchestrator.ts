@@ -3,7 +3,7 @@
 
 import type { ServerConfig } from "./config.ts";
 import { errorResponse, jsonResponse, sanitizeErrorBody } from "./http.ts";
-import { clearedSessionCookie } from "./session.ts";
+import { clearedSessionCookie, sessionEndedCookie } from "./session.ts";
 
 export type Upstream = {
   config: ServerConfig;
@@ -71,10 +71,15 @@ export async function callOrchestrator(upstream: Upstream, call: UpstreamCall): 
 
 // Passes an orchestrator error on with only its documented fields. A 401 also clears
 // the session cookie, so the browser goes back to sign-in.
-export async function relayError(response: Response): Promise<Response> {
-  const headers: Record<string, string> = response.status === 401 ? { "Set-Cookie": clearedSessionCookie() } : {};
+// `sessionCall` false for sign-in itself: a wrong password is not an ended session.
+export async function relayError(response: Response, sessionCall = true): Promise<Response> {
+  const headers = new Headers();
+  if (response.status === 401 && sessionCall) {
+    headers.append("Set-Cookie", clearedSessionCookie());
+    headers.append("Set-Cookie", sessionEndedCookie());
+  }
   const retryAfter = response.headers.get("retry-after");
-  if (response.status === 429 && retryAfter && /^\d{1,6}$/.test(retryAfter)) headers["Retry-After"] = retryAfter;
+  if (response.status === 429 && retryAfter && /^\d{1,6}$/.test(retryAfter)) headers.set("Retry-After", retryAfter);
   let body: unknown;
   try {
     body = await response.json();

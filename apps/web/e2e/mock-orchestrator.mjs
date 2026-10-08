@@ -15,6 +15,7 @@ const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-
 export function startMockOrchestrator(port) {
   const sessions = new Set();
   let brokerHealth = "ok";
+  let failing = null;
   let nextId = 1;
   const conversations = [];
   const messages = new Map();
@@ -102,6 +103,13 @@ export function startMockOrchestrator(port) {
     if (url.pathname === "/__broker" && request.method === "POST") {
       brokerHealth = url.searchParams.get("status") ?? "ok";
       return json(response, 200, {});
+    }
+    if (url.pathname === "/__fail" && request.method === "POST") {
+      failing = url.searchParams.get("path") || null;
+      return json(response, 200, {});
+    }
+    if (failing && url.pathname === failing) {
+      return fail(response, 502, "BROKER_UNAVAILABLE", "Unavailable.");
     }
     if (url.pathname === "/v1/sessions" && request.method === "POST") {
       let body = "";
