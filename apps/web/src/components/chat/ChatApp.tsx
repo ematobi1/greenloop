@@ -59,6 +59,9 @@ export default function ChatApp() {
   const [deltaTick, setDeltaTick] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
   const abort = useRef<AbortController | null>(null);
+  // Bumped when a send starts, so a history load still in flight can't overwrite the
+  // messages that the stream is adding.
+  const loadSeq = useRef(0);
   const draftField = useRef<HTMLTextAreaElement>(null);
 
   const signal = useCallback((event: ChatSignal) => setCoreState((current) => nextCoreState(current, event)), []);
@@ -101,9 +104,10 @@ export default function ChatApp() {
   useEffect(() => {
     if (!activeId) return;
     let current = true;
+    const seq = ++loadSeq.current;
     api.listMessages(activeId).then(
       (page) => {
-        if (!current) return;
+        if (!current || seq !== loadSeq.current) return;
         setMessages(page.messages.map(shown));
         setHidden(page.hidden);
       },
@@ -146,6 +150,7 @@ export default function ChatApp() {
     setError(null);
     const conversationId = activeId ?? (await newConversation());
     if (!conversationId) return;
+    loadSeq.current += 1;
     setStreaming("");
     signal("send");
     const controller = new AbortController();

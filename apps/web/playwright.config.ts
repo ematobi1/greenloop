@@ -12,6 +12,8 @@ export default defineConfig({
   retries: 0,
   reporter: "list",
   globalSetup: "./e2e/global-setup.mjs",
-  use: { baseURL: WEB_ORIGIN, trace: "off" },
+  // Reduced motion by default: the headless browser renders WebGL in software, and an
+  // animated globe would compete with the tests for CPU. The globe's own tests opt back in.
+  use: { baseURL: WEB_ORIGIN, trace: "off", contextOptions: { reducedMotion: "reduce" } },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
 });

@@ -1,5 +1,5 @@
-import SectionPage from "@/components/SectionPage";
+import PlansApp from "@/components/plans/PlansApp";
 
 export default function Page() {
-  return <SectionPage slug="plans" />;
+  return <PlansApp />;
 }

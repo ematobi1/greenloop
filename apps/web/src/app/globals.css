@@ -849,3 +849,19 @@ a {
     min-height: 34rem;
   }
 }
+
+.plans,
+.plans__list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--hud-space-3);
+  list-style: none;
+}
+
+.plans__item[data-status="discarded"] {
+  opacity: 0.7;
+}
+
+.section .hud-label svg {
+  vertical-align: middle;
+}
