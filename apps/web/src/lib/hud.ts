@@ -83,3 +83,30 @@ export function updatedLabel(iso: string | undefined, now: Date): string {
   if (seconds < 60) return `Updated ${seconds} s ago`;
   return `Updated ${Math.round(seconds / 60)} min ago`;
 }
+
+export type ActivityItem = { kind: "conversation" | "memory" | "plan"; id: string; text: string; at: string };
+
+type Dated = { at: string };
+
+// The newest `limit` items across conversations, memories and plans. Memory and plan text
+// is untrusted and is only ever rendered as text.
+export function activityItems(
+  conversations: readonly { conversation_id: string; title: string; updated_at: string }[],
+  memories: readonly { record_id: string; content: string; created_at: string }[],
+  plans: readonly { plan_id: string; goal: string; status: string; created_at?: string }[],
+  limit = 8,
+): ActivityItem[] {
+  const items: ActivityItem[] = [
+    ...conversations.map((c) => ({ kind: "conversation" as const, id: c.conversation_id, text: `Conversation: ${c.title}`, at: c.updated_at })),
+    ...memories.map((m) => ({ kind: "memory" as const, id: m.record_id, text: `Remembered: ${clip(m.content)}`, at: m.created_at })),
+    ...plans
+      .filter((p) => p.created_at)
+      .map((p) => ({ kind: "plan" as const, id: p.plan_id, text: `Plan ${p.status}: ${clip(p.goal)}`, at: p.created_at! })),
+  ];
+  return items.sort((a: Dated, b: Dated) => Date.parse(b.at) - Date.parse(a.at)).slice(0, limit);
+}
+
+function clip(text: string, max = 80): string {
+  const flat = text.replace(/\s+/g, " ").trim();
+  return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
+}

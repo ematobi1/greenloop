@@ -1,11 +1,12 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 
 import * as api from "@/lib/api";
 import { isSignedOut } from "@/lib/errors";
 import { REFRESH_MS, type Health, type Overview } from "@/lib/hud";
+import { useVisiblePoll } from "@/lib/use-visible-poll";
 
 type HudData = { overview: Overview | null; health: Health | null; refresh: () => void };
 
@@ -30,25 +31,7 @@ export function HudDataProvider({ children }: { children: React.ReactNode }) {
     api.health().then(setHealth, onError);
   }, [router]);
 
-  useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | null = null;
-    const start = () => {
-      if (timer !== null) return;
-      refresh();
-      timer = setInterval(refresh, REFRESH_MS);
-    };
-    const stop = () => {
-      if (timer !== null) clearInterval(timer);
-      timer = null;
-    };
-    const onVisibility = () => (document.hidden ? stop() : start());
-    if (!document.hidden) start();
-    document.addEventListener("visibilitychange", onVisibility);
-    return () => {
-      stop();
-      document.removeEventListener("visibilitychange", onVisibility);
-    };
-  }, [refresh]);
+  useVisiblePoll(refresh, REFRESH_MS);
 
   return <Context.Provider value={{ overview, health, refresh }}>{children}</Context.Provider>;
 }

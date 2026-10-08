@@ -9,9 +9,11 @@ import * as api from "@/lib/api";
 export default function PlanPanel({
   conversationId,
   onError,
+  onDrafted,
 }: {
   conversationId: string;
   onError: (caught: unknown) => void;
+  onDrafted?: () => void;
 }) {
   const [goal, setGoal] = useState("");
   const [pending, setPending] = useState(false);
@@ -24,6 +26,7 @@ export default function PlanPanel({
     try {
       setPlan(await api.draftPlan(goal.trim(), conversationId));
       setGoal("");
+      onDrafted?.();
     } catch (caught) {
       onError(caught);
     } finally {

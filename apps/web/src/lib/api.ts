@@ -193,7 +193,14 @@ export async function deleteMemory(recordId: string): Promise<void> {
 
 // Mirrors Plan and PlanStep in packages/contracts (plan.py).
 export type PlanStep = { title: string; description: string; depends_on: number[] };
-export type Plan = { plan_id: string; goal: string; status: string; steps: PlanStep[]; conversation_id: string | null };
+export type Plan = {
+  plan_id: string;
+  goal: string;
+  status: string;
+  steps: PlanStep[];
+  conversation_id: string | null;
+  created_at: string;
+};
 
 export async function draftPlan(goal: string, conversationId?: string): Promise<Plan> {
   const body = conversationId ? { goal, conversation_id: conversationId } : { goal };
@@ -219,4 +226,8 @@ export async function overview(): Promise<import("./hud.ts").Overview> {
 
 export async function health(): Promise<import("./hud.ts").Health> {
   return (await send("/api/health")).json();
+}
+
+export async function listPlans(): Promise<Plan[]> {
+  return (await (await send("/api/plans")).json()).data;
 }
