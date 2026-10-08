@@ -108,6 +108,26 @@ export async function signIn(request: Request, deps: Deps): Promise<Response> {
   return emptyResponse(204, { "Set-Cookie": sessionCookie(session.session_token, lifetimeSeconds) });
 }
 
+// Who is signed in (username for the user menu). Only these fields pass through.
+export async function currentSession(request: Request, deps: Deps): Promise<Response> {
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  let response: Response;
+  try {
+    response = await callOrchestrator(deps, { method: "GET", path: "/v1/sessions/current", token, signal: request.signal });
+  } catch (error) {
+    if (error instanceof UpstreamFailure) return error.response;
+    throw error;
+  }
+  if (!response.ok) return relayError(response);
+  const body = (await response.json().catch(() => null)) as Record<string, unknown> | null;
+  const { username, display_name: displayName, expires_at: expiresAt } = body ?? {};
+  if (typeof username !== "string" || typeof displayName !== "string" || typeof expiresAt !== "string") {
+    return errorResponse(502, "ORCHESTRATOR_ERROR", "The GreenLoop server sent an unexpected reply.");
+  }
+  return jsonResponse({ username, display_name: displayName, expires_at: expiresAt });
+}
+
 // Revokes the server-side session (or every session with ?scope=all), then clears the
 // cookie whatever the orchestrator says, so the browser is signed out either way.
 export async function signOut(request: Request, deps: Deps): Promise<Response> {

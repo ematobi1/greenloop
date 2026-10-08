@@ -1,12 +1,16 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, type FormEvent } from "react";
 
 import * as api from "@/lib/api";
 import { messageFor } from "@/lib/errors";
 
+import GreenLoopMark from "../shell/GreenLoopMark";
+
 // Username and password go to /api/session once; the browser keeps neither (ADR 0012).
-export default function SignInForm({ notice, onSignedIn }: { notice: string | null; onSignedIn: () => void }) {
+export default function SignInForm({ notice }: { notice: string | null }) {
+  const router = useRouter();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -19,7 +23,9 @@ export default function SignInForm({ notice, onSignedIn }: { notice: string | nu
     try {
       await api.signIn(username.trim(), password);
       setPassword("");
-      onSignedIn();
+      // refresh() makes the server layout see the new session cookie.
+      router.replace("/chat");
+      router.refresh();
     } catch (failure) {
       setPassword("");
       setError(messageFor(failure instanceof api.ApiError ? failure.failure : { status: 0, code: "", message: "" }));
@@ -30,11 +36,18 @@ export default function SignInForm({ notice, onSignedIn }: { notice: string | nu
 
   const message = error ?? notice;
   return (
-    <form className="sign-in" onSubmit={submit} aria-labelledby="sign-in-title">
+    <form className="sign-in hud-panel" onSubmit={submit} aria-labelledby="sign-in-title">
+      <p className="hud-brand">
+        <GreenLoopMark />
+        <span>
+          <span className="hud-brand__name">GreenLoop</span>
+          <span className="hud-brand__tagline">Your second brain</span>
+        </span>
+      </p>
       <h1 id="sign-in-title" className="section__title">
         Sign in
       </h1>
-      <label htmlFor="username" className="sign-in__label">
+      <label htmlFor="username" className="sign-in__label hud-label">
         Username
       </label>
       <input
@@ -49,7 +62,7 @@ export default function SignInForm({ notice, onSignedIn }: { notice: string | nu
         value={username}
         onChange={(event) => setUsername(event.target.value)}
       />
-      <label htmlFor="password" className="sign-in__label">
+      <label htmlFor="password" className="sign-in__label hud-label">
         Password
       </label>
       <input

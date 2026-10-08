@@ -132,6 +132,29 @@ def _require_session(principal: CurrentPrincipal) -> str:
     return principal.session_id
 
 
+class CurrentSessionOut(BaseModel):
+    principal_id: str
+    username: str
+    display_name: str
+    expires_at: datetime
+
+
+@router.get("/current")
+def current_session(principal: CurrentPrincipal, session: DbSession) -> CurrentSessionOut:
+    """Who is signed in on this web session, for the web app's user menu."""
+    details = accounts.session_details(session, _require_session(principal))
+    session.rollback()
+    if details is None:
+        raise ApiError(401, "UNAUTHENTICATED", "Missing or invalid token.")
+    username, expires_at = details
+    return CurrentSessionOut(
+        principal_id=principal.principal_id,
+        username=username,
+        display_name=principal.display_name,
+        expires_at=expires_at,
+    )
+
+
 @router.delete("/current", status_code=204)
 def sign_out(principal: CurrentPrincipal, request: Request, session: DbSession) -> Response:
     session_id = _require_session(principal)

@@ -6,10 +6,10 @@ import { fileURLToPath } from "node:url";
 
 import { SECTIONS, sectionBySlug } from "../src/app/sections.ts";
 
-const appDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "app");
-const EXPECTED = ["chat", "memory", "approvals", "agents", "workflows", "audit", "settings"];
+const appDir = join(dirname(fileURLToPath(import.meta.url)), "..", "src", "app", "(hud)");
+const EXPECTED = ["chat", "memory", "plans", "approvals", "agents", "workflows", "audit", "settings"];
 
-test("sections cover the seven planned areas in nav order", () => {
+test("sections cover the eight areas in nav order", () => {
   assert.deepEqual(
     SECTIONS.map((section) => section.slug),
     EXPECTED,
@@ -46,8 +46,13 @@ test("sectionBySlug rejects unknown slugs", () => {
   assert.throws(() => sectionBySlug("admin"), /Unknown section/);
 });
 
-test("layout builds its nav from SECTIONS", () => {
-  const layout = readFileSync(join(appDir, "layout.tsx"), "utf8");
-  assert.match(layout, /SECTIONS\.map/);
-  assert.match(layout, /aria-label="Main"/);
+test("the shell builds its tabs and rail from SECTIONS", () => {
+  const nav = readFileSync(join(appDir, "..", "..", "components", "shell", "Nav.tsx"), "utf8");
+  assert.equal(nav.match(/SECTIONS\.map/g).length, 2);
+  assert.match(nav, /aria-label="Main"/);
+});
+
+test("signed-in pages sit behind a cookie check and / goes to /chat", () => {
+  assert.ok(readFileSync(join(appDir, "layout.tsx"), "utf8").includes('redirect("/sign-in")'));
+  assert.ok(readFileSync(join(appDir, "..", "page.tsx"), "utf8").includes('redirect("/chat")'));
 });
