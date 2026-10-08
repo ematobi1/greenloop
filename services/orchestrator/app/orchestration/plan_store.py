@@ -58,8 +58,12 @@ class PlanStore:
         self._audit("plan.draft", plan.plan_id, {"steps": len(plan.steps), **(usage or {})})
         return plan
 
-    def list(self, *, limit: int, offset: int) -> tuple[list[Plan], int]:
+    def list(
+        self, *, limit: int, offset: int, status: PlanStatus | None = None
+    ) -> tuple[list[Plan], int]:
         condition = PlanRow.principal_id == self._principal_id
+        if status is not None:
+            condition = condition & (PlanRow.status == status.value)
         total = self._session.scalar(select(func.count()).select_from(PlanRow).where(condition))
         rows = self._session.scalars(
             select(PlanRow)

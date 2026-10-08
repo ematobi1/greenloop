@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import Clock from "./Clock";
+import { HudDataProvider } from "./HudData";
 import GreenLoopMark from "./GreenLoopMark";
 import { Rail, Tabs } from "./Nav";
 import StatusPill from "./StatusPill";
@@ -10,6 +11,7 @@ import UserMenu from "./UserMenu";
 // and the left icon rail. Pages render inside <main>.
 export default function Shell({ children }: { children: React.ReactNode }) {
   return (
+    <HudDataProvider>
     <div className="hud-shell">
       <header className="hud-topbar">
         <Link href="/chat" className="hud-brand">
@@ -33,5 +35,6 @@ export default function Shell({ children }: { children: React.ReactNode }) {
         </main>
       </div>
     </div>
+    </HudDataProvider>
   );
 }

@@ -14,6 +14,7 @@ const SSE_HEADERS = { "Content-Type": "text/event-stream", "Cache-Control": "no-
 
 export function startMockOrchestrator(port) {
   const sessions = new Set();
+  let brokerHealth = "ok";
   let nextId = 1;
   const conversations = [];
   const messages = new Map();
@@ -95,6 +96,13 @@ export function startMockOrchestrator(port) {
       sessions.clear();
       return json(response, 200, {});
     }
+    if (url.pathname === "/v1/health" && request.method === "GET") {
+      return json(response, 200, { status: "ok", checks: { database: "ok", broker: brokerHealth } });
+    }
+    if (url.pathname === "/__broker" && request.method === "POST") {
+      brokerHealth = url.searchParams.get("status") ?? "ok";
+      return json(response, 200, {});
+    }
     if (url.pathname === "/v1/sessions" && request.method === "POST") {
       let body = "";
       for await (const chunk of request) body += chunk;
@@ -142,6 +150,17 @@ export function startMockOrchestrator(port) {
     for await (const chunk of request) body += chunk;
     const data = body ? JSON.parse(body) : {};
 
+    if (url.pathname === "/v1/approvals" && request.method === "GET") {
+      return json(response, 200, { data: [], meta: { total: 0, limit } });
+    }
+    if (url.pathname === "/v1/agents" && request.method === "GET") {
+      return json(response, 200, { data: [], meta: { total: 3, limit, offset } });
+    }
+    if (url.pathname === "/v1/plans" && request.method === "GET") {
+      const status = url.searchParams.get("status");
+      const list = [...plans.values()].filter((plan) => !status || plan.status === status);
+      return json(response, 200, { data: list.slice(offset, offset + limit), meta: { total: list.length, limit, offset } });
+    }
     if (url.pathname === "/v1/conversations" && request.method === "GET") {
       return json(response, 200, {
         data: conversations.slice(offset, offset + limit),

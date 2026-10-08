@@ -23,7 +23,7 @@ from app.memory import retrieval
 from app.memory.indexing import embed_query
 from app.orchestration import planner
 from app.orchestration.plan_store import PlanNotFoundError, PlanStore
-from greenloop_contracts import Plan
+from greenloop_contracts import Plan, PlanStatus
 from greenloop_contracts.base import Identifier
 from greenloop_contracts.plan import Goal
 
@@ -146,8 +146,10 @@ def _store_plan(
 
 
 @router.get("")
-def list_plans(store: Store, limit: Limit = 50, offset: Offset = 0) -> PlanPage:
-    plans, total = store.list(limit=limit, offset=offset)
+def list_plans(
+    store: Store, limit: Limit = 50, offset: Offset = 0, status: PlanStatus | None = None
+) -> PlanPage:
+    plans, total = store.list(limit=limit, offset=offset, status=status)
     return PlanPage(data=plans, meta=PageMeta(total=total, limit=limit, offset=offset))
 
 
