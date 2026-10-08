@@ -101,7 +101,7 @@ export default function MemoryApp() {
   }
 
   return (
-    <section className="memory" aria-labelledby="memory-title">
+    <section className="memory hud-panel" aria-labelledby="memory-title">
       <h1 id="memory-title" className="section__title">
         Memory
       </h1>
