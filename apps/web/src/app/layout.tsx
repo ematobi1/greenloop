@@ -1,7 +1,17 @@
 import type { Metadata } from "next";
-import Link from "next/link";
+import localFont from "next/font/local";
+
 import "./globals.css";
-import { SECTIONS } from "./sections";
+
+// Bundled Orbitron (SIL OFL, src/fonts/orbitron/OFL.txt) for headings, numbers and labels.
+const orbitron = localFont({
+  src: [
+    { path: "../fonts/orbitron/orbitron-latin-500-normal.woff2", weight: "500", style: "normal" },
+    { path: "../fonts/orbitron/orbitron-latin-700-normal.woff2", weight: "700", style: "normal" },
+  ],
+  variable: "--font-orbitron",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "GreenLoop",
@@ -10,26 +20,8 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en">
-      <body>
-        <header className="site-header">
-          <Link href="/" className="site-header__brand">
-            GreenLoop
-          </Link>
-          <nav aria-label="Main" className="site-nav">
-            <ul className="site-nav__list">
-              {SECTIONS.map((section) => (
-                <li key={section.slug}>
-                  <Link href={`/${section.slug}`} className="site-nav__link">
-                    {section.title}
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </nav>
-        </header>
-        <main className="site-main">{children}</main>
-      </body>
+    <html lang="en" className={orbitron.variable}>
+      <body>{children}</body>
     </html>
   );
 }

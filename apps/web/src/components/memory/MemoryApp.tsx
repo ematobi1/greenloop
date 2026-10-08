@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useState, type FormEvent } from "react";
 
-import SignInForm from "@/components/chat/SignInForm";
+import { useRouter } from "next/navigation";
+
 import * as api from "@/lib/api";
 import { isSignedOut, messageFor, type ApiFailure } from "@/lib/errors";
 
@@ -14,9 +15,8 @@ const LABELS: Record<string, string> = {
 };
 
 // Memory content is untrusted text: it is only ever rendered as React text children.
-export default function MemoryApp({ initiallySignedIn }: { initiallySignedIn: boolean }) {
-  const [signedIn, setSignedIn] = useState(initiallySignedIn);
-  const [notice, setNotice] = useState<string | null>(null);
+export default function MemoryApp() {
+  const router = useRouter();
   const [records, setRecords] = useState<api.MemoryRecord[]>([]);
   const [total, setTotal] = useState(0);
   const [query, setQuery] = useState("");
@@ -32,16 +32,13 @@ export default function MemoryApp({ initiallySignedIn }: { initiallySignedIn: bo
     const failure: ApiFailure =
       caught instanceof api.ApiError ? caught.failure : { status: 0, code: "UNEXPECTED", message: "" };
     if (isSignedOut(failure)) {
-      setSignedIn(false);
-      setNotice(messageFor(failure));
-      setRecords([]);
+      router.replace(api.EXPIRED_SIGN_IN);
       return;
     }
     setError(messageFor(failure));
-  }, []);
+  }, [router]);
 
   useEffect(() => {
-    if (!signedIn) return;
     let current = true;
     api.listMemory(search).then(
       (page) => {
@@ -54,7 +51,7 @@ export default function MemoryApp({ initiallySignedIn }: { initiallySignedIn: bo
     return () => {
       current = false;
     };
-  }, [signedIn, search, reload, handle]);
+  }, [search, reload, handle]);
 
   function refresh(message: string) {
     setEdit(null);
@@ -101,18 +98,6 @@ export default function MemoryApp({ initiallySignedIn }: { initiallySignedIn: bo
     } catch (caught) {
       handle(caught);
     }
-  }
-
-  if (!signedIn) {
-    return (
-      <SignInForm
-        notice={notice}
-        onSignedIn={() => {
-          setNotice(null);
-          setSignedIn(true);
-        }}
-      />
-    );
   }
 
   return (

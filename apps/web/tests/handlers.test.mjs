@@ -3,6 +3,7 @@ import { test } from "node:test";
 
 import {
   createConversation,
+  currentSession,
   listConversations,
   listMessages,
   PAGE_SIZE,
@@ -539,4 +540,18 @@ test("a session reply that has already expired here sets no cookie", async () =>
   );
   assert.equal(response.status, 502);
   assert.equal(response.headers.get("set-cookie"), null);
+});
+
+test("the current session passes on only username, display name and expiry", async () => {
+  const { calls, deps } = upstream(
+    Response.json({ principal_id: "user-1", username: "terry", display_name: "Terry", expires_at: "2030-01-01T00:00:00Z", extra: "x" }),
+  );
+  const response = await currentSession(request("/api/session"), deps);
+  assert.deepEqual(await response.json(), { username: "terry", display_name: "Terry", expires_at: "2030-01-01T00:00:00Z" });
+  assert.equal(calls[0].url, "http://orchestrator:8000/v1/sessions/current");
+  const signedOutResponse = await currentSession(request("/api/session", { signedIn: false }), deps);
+  assert.equal(signedOutResponse.status, 401);
+  const expired = await currentSession(request("/api/session"), upstream(apiError(401, "UNAUTHENTICATED")).deps);
+  assert.equal(expired.status, 401);
+  assert.ok(expired.headers.get("set-cookie").includes("Max-Age=0"));
 });

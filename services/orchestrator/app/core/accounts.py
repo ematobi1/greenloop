@@ -306,6 +306,20 @@ def sign_in(session: Session, username: str, password: str, correlation_id: str)
     return SignedIn(credential.principal_id, session_id, token, expires_at)
 
 
+def session_details(session: Session, session_id: str) -> tuple[str, datetime] | None:
+    """(username, expires_at) for a live web session, or None."""
+    row = session.execute(
+        select(UserCredentialRow.username, UserSessionRow.expires_at)
+        .join(UserSessionRow, UserSessionRow.principal_id == UserCredentialRow.principal_id)
+        .where(
+            UserSessionRow.session_id == session_id,
+            UserSessionRow.revoked_at.is_(None),
+            UserSessionRow.expires_at > datetime.now(UTC),
+        )
+    ).one_or_none()
+    return (row[0], row[1]) if row is not None else None
+
+
 def find_session_principal(session: Session, token: str) -> tuple[PrincipalRow, str] | None:
     """The active principal and session id for a live session token, else None."""
     row = session.execute(

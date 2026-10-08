@@ -112,6 +112,10 @@ export function startMockOrchestrator(port) {
       return json(response, 201, { session_token: token, principal_id: "user-1", expires_at: expiresAt });
     }
     const bearer = (request.headers.authorization ?? "").replace(/^Bearer /, "");
+    if (url.pathname === "/v1/sessions/current" && request.method === "GET" && sessions.has(bearer)) {
+      const expiresAt = new Date(Date.now() + 12 * 3600 * 1000).toISOString();
+      return json(response, 200, { principal_id: "user-1", username: E2E_USERNAME, display_name: "Alice", expires_at: expiresAt });
+    }
     if (url.pathname === "/v1/sessions/current" && request.method === "DELETE" && sessions.delete(bearer)) {
       response.writeHead(204);
       return response.end();

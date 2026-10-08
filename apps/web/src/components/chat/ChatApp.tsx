@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from "react";
 
+import { useRouter } from "next/navigation";
+
 import * as api from "@/lib/api";
 import { isSignedOut, messageFor, type ApiFailure } from "@/lib/errors";
 
 import PlanPanel from "./PlanPanel";
-import SignInForm from "./SignInForm";
 
 type Shown = { key: string; role: string; content: string; incomplete: boolean };
 
@@ -27,9 +28,8 @@ function canRemember(messages: Shown[], index: number): boolean {
 
 // All text from the server (messages, titles) is rendered as React text children, so
 // it is escaped. Memory and model output are untrusted: never render them as HTML.
-export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: boolean }) {
-  const [signedIn, setSignedIn] = useState(initiallySignedIn);
-  const [notice, setNotice] = useState<string | null>(null);
+export default function ChatApp() {
+  const router = useRouter();
   const [conversations, setConversations] = useState<api.Conversation[]>([]);
   const [conversationTotal, setConversationTotal] = useState(0);
   const [hidden, setHidden] = useState(0);
@@ -45,15 +45,11 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   const fail = useCallback((failure: ApiFailure) => {
     if (isSignedOut(failure)) {
       abort.current?.abort();
-      setSignedIn(false);
-      setNotice(messageFor(failure));
-      setConversations([]);
-      setActiveId(null);
-      setMessages([]);
+      router.replace(api.EXPIRED_SIGN_IN);
       return;
     }
     setError(messageFor(failure));
-  }, []);
+  }, [router]);
 
   const handle = useCallback(
     (caught: unknown) => {
@@ -64,12 +60,11 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
   );
 
   useEffect(() => {
-    if (!signedIn) return;
     api.listConversations().then(({ conversations: rows, total }) => {
       setConversations(rows);
       setConversationTotal(total);
     }, handle);
-  }, [signedIn, handle]);
+  }, [handle]);
 
   useEffect(() => {
     if (!activeId) return;
@@ -159,18 +154,6 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
     }
   }
 
-  async function signOut(everywhere = false) {
-    abort.current?.abort();
-    try {
-      await api.signOut(everywhere);
-    } catch (caught) {
-      handle(caught);
-      return;
-    }
-    fail({ status: 401, code: "SIGNED_OUT_BY_USER", message: "" });
-    setNotice(everywhere ? "You're signed out on every device." : "You're signed out.");
-  }
-
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void sendDraft();
@@ -181,19 +164,6 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
       event.preventDefault();
       void sendDraft();
     }
-  }
-
-  if (!signedIn) {
-    return (
-      <SignInForm
-        notice={notice}
-        onSignedIn={() => {
-          setNotice(null);
-          setError(null);
-          setSignedIn(true);
-        }}
-      />
-    );
   }
 
   return (
@@ -219,12 +189,6 @@ export default function ChatApp({ initiallySignedIn }: { initiallySignedIn: bool
         {conversationTotal > conversations.length && (
           <p className="chat__empty">Showing your {conversations.length} most recent conversations.</p>
         )}
-        <button type="button" className="button button--quiet" onClick={() => void signOut()}>
-          Sign out
-        </button>
-        <button type="button" className="button button--quiet" onClick={() => void signOut(true)}>
-          Sign out everywhere
-        </button>
       </aside>
 
       <section className="chat__main" aria-label="Messages">

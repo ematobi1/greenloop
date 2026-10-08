@@ -203,3 +203,12 @@ export async function draftPlan(goal: string, conversationId?: string): Promise<
 export async function discardPlan(planId: string): Promise<void> {
   await send(`/api/plans/${encodeURIComponent(planId)}`, { method: "DELETE" });
 }
+
+export type CurrentSession = { username: string; display_name: string; expires_at: string };
+
+export async function currentSession(): Promise<CurrentSession> {
+  return (await send("/api/session")).json();
+}
+
+// Where an expired or revoked session goes: sign-in, with a note.
+export const EXPIRED_SIGN_IN = "/sign-in?expired=1";
