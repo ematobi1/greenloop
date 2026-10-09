@@ -2,7 +2,7 @@
 
 Next.js 16 (App Router) + TypeScript. The single user-facing app for chat, memory, approvals, agents, workflows, audit and settings.
 
-Every section except Chat and Memory is a placeholder until its roadmap phase (see `src/app/sections.ts`). The app talks only to the orchestrator API, never directly to the broker or tools.
+The app is a HUD command center ([ADR 0014](../../docs/adr/0014-hud-theme-and-globe.md)): `/chat` holds the KPI tiles, conversations, live activity, the globe, the assistant and system health; Memory and Plans are full pages. Every other section is a placeholder until its roadmap phase (see `src/app/sections.ts`). The app talks only to the orchestrator API, never directly to the broker or tools.
 
 ## How chat reaches the orchestrator
 
@@ -11,6 +11,7 @@ The browser only calls this app's own routes under `src/app/api/`. Those routes 
 - Sign in with your username and password ([ADR 0012](../../docs/adr/0012-web-sign-in.md)). The server-side session token is stored only in an httpOnly, Secure, SameSite=Strict cookie for at most 12 hours. "Sign out everywhere" ends every session.
 - `src/server/` holds everything that touches the token: config, session cookie, origin check, orchestrator client and the route handlers. Client code must never import from it (a unit test checks).
 - Replies stream over SSE and render as plain text. Never render server text as HTML.
+- Theme: take every colour, glow, spacing and font from `src/styles/tokens.css`; `tests/tokens.test.mjs` checks WCAG AA contrast. three.js is loaded only by `src/components/hud/HudGlobe.tsx`.
 - Memory: search, history, correct, replace (supersede) and delete (a tombstone, so the chain is never used in chat again; ADR 0011). The browser can't set confidence; only system principals verify memory.
 
 Server environment:

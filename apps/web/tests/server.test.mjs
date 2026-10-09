@@ -197,3 +197,15 @@ test("the session cookie's Max-Age follows the session and is capped at 12 hours
   assert.match(sessionCookie(TOKEN, 99_999_999), /; Max-Age=43200;/);
   assert.match(sessionCookie(TOKEN, -5), /; Max-Age=0;/);
 });
+
+test("a rejected session clears the cookie and leaves a short-lived, secret-free marker", async () => {
+  const response = await relayError(Response.json({ error: { code: "UNAUTHENTICATED", message: "m" } }, { status: 401 }));
+  const cookies = response.headers.getSetCookie();
+  assert.equal(cookies.length, 2);
+  assert.ok(cookies[0].startsWith(`${SESSION_COOKIE}=;`) && cookies[0].includes("Max-Age=0"));
+  assert.ok(cookies[1].startsWith("__Host-greenloop_session_ended=1;"));
+  for (const attribute of ["Path=/", "Max-Age=120", "HttpOnly", "Secure", "SameSite=Strict"]) {
+    assert.ok(cookies[1].split("; ").includes(attribute), attribute);
+  }
+  assert.equal(response.headers.get("cache-control"), "no-store");
+});

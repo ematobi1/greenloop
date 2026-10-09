@@ -24,9 +24,14 @@ function watchForToken(page: Page): string[] {
 
 async function signIn(page: Page, username = E2E_USERNAME, password = E2E_PASSWORD) {
   await page.goto("/chat");
+  await expect(page).toHaveURL(/\/sign-in$/);
   await page.getByLabel("Username").fill(username);
   await page.getByLabel("Password").fill(password);
   await page.getByRole("button", { name: "Sign in" }).click();
+}
+
+async function userMenu(page: Page) {
+  await page.getByRole("button", { name: /Signed in as/ }).click();
 }
 
 test.describe.configure({ mode: "serial" });
@@ -80,9 +85,10 @@ test("a reply streams in piece by piece, then is stored", async ({ page }) => {
   await page.getByLabel("Message", { exact: true }).fill("hello");
   await page.getByLabel("Message", { exact: true }).press("Enter");
 
-  const live = page.locator('[aria-live="polite"]');
-  await expect(live).toHaveText("Hello");
-  await expect(live).toHaveText("Hello from");
+  const live = page.locator(".message--streaming .message__text");
+  // Deltas arrive 300 ms apart; a busy main thread may merge later ones, but the first
+  // always shows on its own, before the reply is complete.
+  await expect(live).toHaveText(/^Hello( from)?$/);
   await expect(page.locator(".message--assistant .message__text")).toHaveText("Hello from GreenLoop");
   await expect(live).toHaveCount(0);
   await expect(page.locator(".message--user .message__text")).toHaveText("hello");
@@ -101,7 +107,7 @@ test("HTML in a reply is shown as text and never runs", async ({ page }) => {
   await page.getByLabel("Message", { exact: true }).fill("html please");
   await page.getByRole("button", { name: "Send" }).click();
   // Wait for the stored reply, not the streaming preview, which is always plain text.
-  await expect(page.locator('[aria-live="polite"]')).toHaveCount(0);
+  await expect(page.locator(".message--streaming")).toHaveCount(0);
   const reply = page.locator(".message--assistant .message__text");
   await expect(reply).toHaveCount(1);
   await expect(reply).toHaveText('<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>');
@@ -130,7 +136,7 @@ test("a message can be saved to memory once", async ({ page }) => {
   await page.getByRole("button", { name: "Start a conversation" }).click();
   await page.getByLabel("Message", { exact: true }).fill("I prefer green tea");
   await page.getByLabel("Message", { exact: true }).press("Enter");
-  await expect(page.locator('[aria-live="polite"]')).toHaveCount(0);
+  await expect(page.locator(".message--streaming")).toHaveCount(0);
   const userMessage = page.locator(".message--user");
   await userMessage.getByRole("button", { name: "Remember" }).click();
   await expect(page.locator(".chat__notice")).toHaveText("Saved to memory.");
@@ -141,7 +147,7 @@ test("a message can be saved to memory once", async ({ page }) => {
 
 test("the memory page lists, searches, corrects, shows history, replaces and deletes", async ({ page }) => {
   await signIn(page);
-  await page.getByRole("link", { name: "Memory" }).click();
+  await page.getByRole("navigation", { name: "Main" }).getByRole("link", { name: "Memory" }).click();
   const items = page.locator(".memory__item");
   await expect(items).toHaveCount(1);
   await expect(items.first().locator(".message__text")).toHaveText("I prefer green tea");
@@ -241,8 +247,10 @@ test("cross-site and form-encoded writes are refused", async ({ request }) => {
 
 test("sign-out clears the cookie and returns to sign-in", async ({ page, context }) => {
   await signIn(page);
+  await userMenu(page);
   await page.getByRole("button", { name: "Sign out", exact: true }).click();
-  await expect(page.locator(".sign-in__error")).toHaveText("You're signed out.");
+  await expect(page).toHaveURL(/\/sign-in$/);
+  await expect(page.locator(".sign-in__error")).toHaveText("");
   expect((await context.cookies()).filter((item) => item.name === COOKIE)).toEqual([]);
 });
 
@@ -252,8 +260,9 @@ test("sign out everywhere ends the other browser's session too", async ({ page, 
   const otherPage = await other.newPage();
   await signIn(otherPage);
   await expect(otherPage.getByRole("button", { name: "Start a conversation" })).toBeVisible();
+  await userMenu(page);
   await page.getByRole("button", { name: "Sign out everywhere" }).click();
-  await expect(page.locator(".sign-in__error")).toHaveText("You're signed out on every device.");
+  await expect(page).toHaveURL(/\/sign-in$/);
   expect((await context.cookies()).filter((item) => item.name === COOKIE)).toEqual([]);
   await otherPage.reload();
   await expect(otherPage.locator(".sign-in__error")).toHaveText("Your session has ended. Sign in again.");

@@ -323,3 +323,19 @@ def test_a_full_verification_queue_answers_429_without_waiting(client, user):
         limiter.verifications.release()
     assert response.status_code == 429
     assert _sign_in(client).status_code == 201
+
+
+def test_the_current_session_names_the_signed_in_user(client, user):
+    token = _sign_in(client, username="ALICE").json()["session_token"]
+    response = client.get("/v1/sessions/current", headers=_bearer(token))
+    assert response.status_code == 200
+    body = response.json()
+    assert (body["username"], body["principal_id"]) == ("alice", "user-1")
+    assert token not in response.text
+    client.delete("/v1/sessions/current", headers=_bearer(token))
+    assert client.get("/v1/sessions/current", headers=_bearer(token)).status_code == 401
+
+
+def test_api_tokens_have_no_current_session(client, issue_token):
+    response = client.get("/v1/sessions/current", headers=_bearer(issue_token("user-1")))
+    assert (response.status_code, response.json()["error"]["code"]) == (409, "NOT_A_SESSION")

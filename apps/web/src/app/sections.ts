@@ -19,6 +19,12 @@ export const SECTIONS: readonly Section[] = [
     phase: 2,
   },
   {
+    slug: "plans",
+    title: "Plans",
+    summary: "Review the plans GreenLoop drafted for you. Nothing runs until you approve it.",
+    phase: 2,
+  },
+  {
     slug: "approvals",
     title: "Approvals",
     summary: "Review and approve actions that write, send, delete or spend.",

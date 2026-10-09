@@ -121,7 +121,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 | `services/orchestrator/` | FastAPI orchestrator: auth, reasoning, planning, memory, agents, permissions, audit | Orchestrator | 1, 2 |
 | `services/broker/` | Policy, approval binding and ledger gate in front of MCP | Broker | 3 |
 | `services/self-improvement/` | Proposal, validation, isolation and evidence pipeline; execution disabled | Self-improvement | 7 |
-| `apps/web/` | Next.js + TypeScript UI: chat, memory, approvals, agents, workflows, audit, settings | Frontend | 2, 5 |
+| `apps/web/` | Next.js + TypeScript UI: the HUD command center (chat, KPI tiles, health, live activity, three.js globe; [ADR 0014](docs/adr/0014-hud-theme-and-globe.md)) in the `(hud)` route group with design tokens in `src/styles/tokens.css`; memory, plans, approvals, agents, workflows, audit, settings | Frontend | 2, 5 |
 | `evals/chat_behavior.py` | Chat behavior eval covering both prompt quality and injection; imports orchestrator request assembly (ADR 0006 addendum) | Quality | 2, 6 |
 | `evals/prompts/` | Prompt quality evals | Quality | 2, 6 |
 | `evals/injection/` | Prompt injection and memory-poisoning evals | Quality | 2, 6 |
@@ -134,7 +134,7 @@ This document maps every folder to its role, owning component and roadmap phase.
 | Module | Role | Phase |
 |---|---|---|
 | `main.py` | FastAPI app factory and router wiring | 1 |
-| `api/v1/` | REST endpoints: health, sessions (web sign-in), chat (including remember), memory, plans, agents, dispatches, approvals, audit | 1 (health), 2 |
+| `api/v1/` | REST endpoints: health (database and a 2 s broker probe), sessions (web sign-in, current session), chat (including remember), memory, plans, agents, dispatches, approvals, audit | 1 (health), 2 |
 | `core/` | Config from environment, auth (API and session tokens), accounts (usernames, argon2id, sessions, lockout), logging, errors, redaction | 1 (config), 2 (auth) |
 | `ai/` | Streaming chat engine, system prompts, request assembly (`context.py`), model providers (Anthropic default, Ollama optional), AI error codes | 2 |
 | `conversations/` | Owner-scoped conversations, ordered write-once messages, the per-conversation turn lease | 2 |
