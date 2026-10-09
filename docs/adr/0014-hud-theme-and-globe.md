@@ -19,6 +19,6 @@ The web app was a set of plain pages. The owner wants one HUD-style command cent
 
 ## Consequences
 
-- three.js is a separate chunk, loaded only on the HUD (size in the checkpoint report, measured from `next build`).
+- three.js is a separate chunk, loaded only on the HUD by the dynamic import: 696,018 bytes raw, 174,510 bytes gzipped (level 9), measured from `next build` on 2026-10-08. The globe's own chunk adds 20,275 bytes raw, 7,260 gzipped.
 - Machines without GPU acceleration render WebGL in software; the Playwright suite runs with reduced motion by default for that reason, and the globe's own tests opt back in.
 - Polling is per browser tab, on one 30-second timer: each refresh makes 7 calls to the orchestrator (overview's 5 counts, the session check and health probe) plus 2 for live activity, which reloads after it. Many open tabs multiply that.
