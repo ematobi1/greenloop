@@ -70,6 +70,24 @@ test("reduced motion and phone widths render a still frame, and a hidden tab ren
   assert.equal(renderMode({ reducedMotion: false, hidden: false, narrow: true }), "still");
 });
 
+test("the user's pause stills the globe, and a hidden tab still wins", () => {
+  assert.equal(renderMode({ reducedMotion: false, hidden: false, userPaused: true }), "still");
+  assert.equal(renderMode({ reducedMotion: false, hidden: true, userPaused: true }), "paused");
+});
+
+test("a broker that isn't configured is unknown on the globe, not degraded", () => {
+  const h = health({ orchestrator: "ok", broker: "not_configured", database: "ok" });
+  assert.equal(nodeLevel(GLOBE_NODES.find((node) => node.id === "tools"), h), "unknown");
+});
+
+test("the globe stops orbiting under a pointer or focus, and frees its WebGL context", () => {
+  const source = readFileSync(new URL("../src/components/hud/HudGlobe.tsx", import.meta.url), "utf8");
+  assert.match(source, /!drag && !live\.current\.hold/);
+  assert.match(source, /onFocus=\{\(\) => hold\(true\)\}/);
+  assert.match(source, /"pointercancel", up/);
+  assert.match(source, /forceContextLoss\(\)/);
+});
+
 test("three.js is loaded lazily and only by the globe", () => {
   const source = readFileSync(new URL("../src/components/hud/HudGlobe.tsx", import.meta.url), "utf8");
   assert.match(source, /import\("three"\)/);

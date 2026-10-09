@@ -32,6 +32,11 @@ export function sessionEndedCookie(): string {
   return `${SESSION_ENDED_COOKIE}=1; Path=/; Max-Age=120; HttpOnly; Secure; SameSite=Strict`;
 }
 
+// Sent with a successful sign-in, so a later sign-out doesn't read as an ended session.
+export function clearedSessionEndedCookie(): string {
+  return `${SESSION_ENDED_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`;
+}
+
 export function readSessionToken(request: Request): string | null {
   const header = request.headers.get("cookie");
   if (!header) return null;

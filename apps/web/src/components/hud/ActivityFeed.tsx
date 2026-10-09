@@ -1,34 +1,39 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
 
+import { useHudData } from "@/components/shell/HudData";
 import * as api from "@/lib/api";
-import { REFRESH_MS, activityItems } from "@/lib/hud";
-import { useVisiblePoll } from "@/lib/use-visible-poll";
+import { isSignedOut } from "@/lib/errors";
+import { activityItems } from "@/lib/hud";
 
 // Live activity: recent conversations, memories and plans. The audit feed joins in Phase 3.
-export default function ActivityFeed({
-  conversations,
-  reloadKey,
-  onError,
-}: {
-  conversations: api.Conversation[];
-  reloadKey: number;
-  onError: (caught: unknown) => void;
-}) {
+// It reloads on the shell's 30-second refresh (no timer of its own) and at once when the
+// chat changes something. A failed reload keeps the last list and says so quietly here,
+// never in the chat's alert.
+export default function ActivityFeed({ conversations, reloadKey }: { conversations: api.Conversation[]; reloadKey: number }) {
+  const router = useRouter();
+  const { overview } = useHudData();
   const [memories, setMemories] = useState<api.MemoryRecord[]>([]);
   const [plans, setPlans] = useState<api.Plan[]>([]);
+  const [stale, setStale] = useState(false);
 
   const load = useCallback(() => {
-    api.listMemory().then((page) => setMemories(page.records), onError);
-    api.listPlans().then(setPlans, onError);
-  }, [onError]);
-  useVisiblePoll(load, REFRESH_MS);
+    const failed = (caught: unknown) => {
+      if (caught instanceof api.ApiError && isSignedOut(caught.failure)) router.replace(api.EXPIRED_SIGN_IN);
+      else setStale(true);
+    };
+    Promise.all([api.listMemory(), api.listPlans()]).then(([page, rows]) => {
+      setMemories(page.records);
+      setPlans(rows);
+      setStale(false);
+    }, failed);
+  }, [router]);
 
-  // A finished reply, a remembered message or a new plan reloads at once.
   useEffect(() => {
-    if (reloadKey > 0) load();
-  }, [reloadKey, load]);
+    load();
+  }, [overview, reloadKey, load]);
 
   const items = activityItems(conversations, memories, plans);
   return (
@@ -48,7 +53,7 @@ export default function ActivityFeed({
           ))}
         </ol>
       )}
-      <p className="hud-updated">Audit events arrive in Phase 3.</p>
+      <p className="hud-updated">{stale ? "Couldn't refresh just now; showing the last list." : "Audit events arrive in Phase 3."}</p>
     </section>
   );
 }

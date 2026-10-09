@@ -46,7 +46,7 @@ export const GLOBE_NODES: readonly GlobeNode[] = [
 const LEVELS: Record<ServiceStatus, NodeLevel> = {
   ok: "ok",
   unavailable: "warn",
-  not_configured: "warn",
+  not_configured: "unknown",
   unknown: "unknown",
 };
 
@@ -60,22 +60,36 @@ export function nodeStatusText(node: GlobeNode, level: NodeLevel): string {
   return `${node.label}: ${word} (${node.basis})`;
 }
 
-// Colours as numbers for three.js, matching the CSS tokens --hud-ok, --hud-warn, --hud-unknown.
-export const LEVEL_COLOURS: Record<NodeLevel, number> = { ok: 0x3dffa8, warn: 0xffc15a, unknown: 0x7b8aa3 };
+// three.js takes colours as numbers. Each one is a token from styles/tokens.css, named
+// here; tests/tokens.test.mjs checks they still match the CSS.
+export const THEME_COLOURS = {
+  "--hud-accent": 0x3dd6ff,
+  "--hud-accent-2": 0x6f8bff,
+  "--hud-core-hot": 0x9ff0ff,
+  "--hud-ok": 0x3dffa8,
+  "--hud-warn": 0xffc15a,
+  "--hud-unknown": 0x7b8aa3,
+} as const;
+
+export const LEVEL_COLOURS: Record<NodeLevel, number> = {
+  ok: THEME_COLOURS["--hud-ok"],
+  warn: THEME_COLOURS["--hud-warn"],
+  unknown: THEME_COLOURS["--hud-unknown"],
+};
 export const CORE_COLOURS: Record<CoreState, number> = {
-  idle: 0x3dd6ff,
-  waiting: 0x6f8bff,
-  streaming: 0x9ff0ff,
-  error: 0xffc15a,
+  idle: THEME_COLOURS["--hud-accent"],
+  waiting: THEME_COLOURS["--hud-accent-2"],
+  streaming: THEME_COLOURS["--hud-core-hot"],
+  error: THEME_COLOURS["--hud-warn"],
 };
 
-export type MotionContext = { reducedMotion: boolean; hidden: boolean; narrow?: boolean };
+export type MotionContext = { reducedMotion: boolean; hidden: boolean; narrow?: boolean; userPaused?: boolean };
 
-// Reduced motion, and phone widths (battery), render one still frame; a hidden tab
-// renders nothing at all.
-export function renderMode({ reducedMotion, hidden, narrow = false }: MotionContext): "animate" | "still" | "paused" {
+// Reduced motion, phone widths (battery) and the user's own pause render one still frame;
+// a hidden tab renders nothing at all.
+export function renderMode({ reducedMotion, hidden, narrow = false, userPaused = false }: MotionContext): "animate" | "still" | "paused" {
   if (hidden) return "paused";
-  return reducedMotion || narrow ? "still" : "animate";
+  return reducedMotion || narrow || userPaused ? "still" : "animate";
 }
 
 export const NARROW_QUERY = "(max-width: 767px)";

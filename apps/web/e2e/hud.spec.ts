@@ -85,11 +85,31 @@ test.describe("with motion", () => {
     await page.getByLabel("Message", { exact: true }).fill("hello");
     await page.getByLabel("Message", { exact: true }).press("Enter");
     await expect(globe).toHaveAttribute("data-core-state", /waiting|streaming/);
-    await expect(page.locator('[aria-live="polite"]')).toContainText("Hello");
+    await expect(page.locator(".message--streaming")).toContainText("Hello");
     await expect(globe).toHaveAttribute("data-core-state", "streaming");
     await page.screenshot({ path: `${SHOTS}/hud-streaming.png`, fullPage: true });
-    await expect(page.locator('[aria-live="polite"]')).toHaveCount(0);
+    await expect(page.locator(".message--streaming")).toHaveCount(0);
     await expect(globe).toHaveAttribute("data-core-state", "idle");
+  });
+
+  test("the motion can be paused and resumed, and nodes hold still under focus", async ({ page }) => {
+    await signIn(page);
+    const globe = page.locator(".hud-globe");
+    await expect(globe).toHaveAttribute("data-globe", /ready|fallback/);
+    test.skip((await globe.getAttribute("data-globe")) === "fallback", "WebGL unavailable in this browser");
+    await page.getByRole("button", { name: "Pause motion" }).click();
+    await expect(globe).toHaveAttribute("data-motion", "still");
+    const still = await frames(page);
+    await page.waitForTimeout(600);
+    expect(await frames(page)).toBe(still);
+    await page.getByRole("button", { name: "Resume motion" }).click();
+    await expect(globe).toHaveAttribute("data-motion", "animate");
+
+    const node = page.getByRole("button", { name: /^Broker:/ });
+    await node.focus();
+    const at = await node.evaluate((element) => element.style.transform);
+    await page.waitForTimeout(600);
+    expect(await node.evaluate((element) => element.style.transform)).toBe(at);
   });
 
   test("a hidden tab stops drawing the globe", async ({ page }) => {
@@ -153,6 +173,22 @@ test("the Memory page and the mobile HUD screenshots", async ({ page }) => {
   );
   expect(widest).toBeLessThanOrEqual(390);
   await page.screenshot({ path: `${SHOTS}/hud-mobile.png`, fullPage: true });
+});
+
+test("replies are announced, and the thread follows the newest message", async ({ page }) => {
+  await signIn(page);
+  const field = page.getByLabel("Message", { exact: true });
+  for (let turn = 1; turn <= 6; turn++) {
+    await field.fill(`message ${turn}`);
+    await field.press("Enter");
+    await expect(page.getByRole("button", { name: "Send" })).toBeVisible();
+    await expect(page.locator(".message--streaming")).toHaveCount(0);
+  }
+  await expect(page.locator("[data-reply-announcement]")).toContainText("GreenLoop replied:");
+  const list = page.locator(".chat__messages");
+  await expect(list.locator(".message--user").last()).toContainText("message 6");
+  const gap = await list.evaluate((element) => element.scrollHeight - element.scrollTop - element.clientHeight);
+  expect(gap).toBeLessThan(4);
 });
 
 test("the Plans page lists drafts and can discard them", async ({ page }) => {

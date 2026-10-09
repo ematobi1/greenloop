@@ -23,7 +23,7 @@ test("a tile shows its real count", () => {
 });
 
 test("missing or failed data shows a dash with the reason, never a number", () => {
-  assert.deepEqual(kpiView(spec("agents"), null, null), { label: "Agents", value: "—", detail: "Not loaded yet" });
+  assert.deepEqual(kpiView(spec("agents"), null, null), { label: "Agents", value: "—", detail: "No data right now" });
   const failed = { tiles: { agents: { value: null, note: "Unavailable right now" } }, updated_at: "" };
   assert.deepEqual(kpiView(spec("agents"), failed, null), { label: "Agents", value: "—", detail: "Unavailable right now" });
   assert.deepEqual(kpiView({ key: "workflows", label: "Workflows", arrives: 4 }, null, null), {
@@ -48,7 +48,7 @@ test("health reads as online, degraded or offline, with the count of services up
     "System degraded",
   ]);
   assert.equal(healthSummary(health({ orchestrator: "unavailable", broker: "unknown", database: "unknown" })).level, "offline");
-  assert.deepEqual(healthSummary(null), { level: "unknown", percent: null, detail: "Checking services…", word: "System status unknown" });
+  assert.deepEqual(healthSummary(null), { level: "unknown", percent: null, detail: "No status right now", word: "System status unknown" });
   assert.equal(kpiView(spec("health"), null, null).value, "—");
 });
 

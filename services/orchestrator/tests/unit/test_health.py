@@ -91,6 +91,25 @@ def test_a_configured_broker_that_is_down_degrades_readiness(client, monkeypatch
     assert "http" not in response.text
 
 
+def test_repeated_readiness_calls_share_one_broker_probe(client, monkeypatch):
+    from app.api.v1 import health
+
+    probes = []
+
+    async def counted(url, transport=None):
+        probes.append(url)
+        return "unavailable"
+
+    monkeypatch.setattr(health, "broker_status", counted)
+    for _ in range(5):
+        assert client.get("/v1/health").json()["checks"]["broker"] == "unavailable"
+    assert len(probes) == 1
+
+    monkeypatch.setattr(health, "BROKER_CACHE_SECONDS", 0.0)
+    client.get("/v1/health")
+    assert len(probes) == 2
+
+
 def test_the_broker_probe_gives_up_after_its_timeout():
     import asyncio
     import time

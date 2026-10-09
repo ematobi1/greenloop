@@ -8,14 +8,22 @@
 :root {
   color-scheme: dark;
 
+  /* Colour channels, for translucent variants: rgb(var(--hud-accent-rgb) / 0.3) */
+  --hud-accent-rgb: 61 214 255;
+  --hud-accent-2-rgb: 111 139 255;
+  --hud-core-hot-rgb: 159 240 255;
+  --hud-panel-rgb: 10 22 44;
+  --hud-panel-raised-rgb: 16 34 66;
+  --hud-scrim-rgb: 2 8 20;
+
   /* Surfaces */
   --hud-bg: #040914;
   --hud-bg-deep: #02050c;
-  --hud-panel: rgba(10, 22, 44, 0.72);
+  --hud-panel: rgb(var(--hud-panel-rgb) / 0.72);
   --hud-panel-solid: #0a162c;
-  --hud-panel-raised: rgba(16, 34, 66, 0.82);
-  --hud-border: rgba(61, 214, 255, 0.28);
-  --hud-border-strong: rgba(61, 214, 255, 0.65);
+  --hud-panel-raised: rgb(var(--hud-panel-raised-rgb) / 0.82);
+  --hud-border: rgb(var(--hud-accent-rgb) / 0.28);
+  --hud-border-strong: rgb(var(--hud-accent-rgb) / 0.65);
 
   /* Text */
   --hud-text: #e8f3ff;
@@ -29,10 +37,11 @@
   --hud-warn: #ffc15a;
   --hud-error-text: #ff9b8a;
   --hud-unknown: #7b8aa3;
+  --hud-core-hot: #9ff0ff;
 
   /* Glow and glass */
-  --hud-glow: 0 0 0.75rem rgba(61, 214, 255, 0.35), 0 0 2.5rem rgba(61, 214, 255, 0.12);
-  --hud-glow-strong: 0 0 1rem rgba(61, 214, 255, 0.6), 0 0 3rem rgba(61, 214, 255, 0.25);
+  --hud-glow: 0 0 0.75rem rgb(var(--hud-accent-rgb) / 0.35), 0 0 2.5rem rgb(var(--hud-accent-rgb) / 0.12);
+  --hud-glow-strong: 0 0 1rem rgb(var(--hud-accent-rgb) / 0.6), 0 0 3rem rgb(var(--hud-accent-rgb) / 0.25);
   --hud-glass-blur: blur(14px);
   --hud-corner: 0.85rem;
 

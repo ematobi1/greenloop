@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type FocusEvent } from "react";
 
 import * as api from "@/lib/api";
 import { isSignedOut, messageFor } from "@/lib/errors";
@@ -13,6 +13,7 @@ export default function UserMenu() {
   const [open, setOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const button = useRef<HTMLButtonElement>(null);
+  const wrapper = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     api.currentSession().then(
@@ -31,8 +32,16 @@ export default function UserMenu() {
         button.current?.focus();
       }
     };
+    // A click anywhere else closes the menu too.
+    const outside = (event: PointerEvent) => {
+      if (!wrapper.current?.contains(event.target as Node)) setOpen(false);
+    };
     document.addEventListener("keydown", close);
-    return () => document.removeEventListener("keydown", close);
+    document.addEventListener("pointerdown", outside);
+    return () => {
+      document.removeEventListener("keydown", close);
+      document.removeEventListener("pointerdown", outside);
+    };
   }, [open]);
 
   async function signOut(everywhere: boolean) {
@@ -49,8 +58,13 @@ export default function UserMenu() {
     router.refresh();
   }
 
+  // Tabbing out of the menu closes it.
+  function onBlur(event: FocusEvent<HTMLDivElement>) {
+    if (!wrapper.current?.contains(event.relatedTarget as Node | null)) setOpen(false);
+  }
+
   return (
-    <div className="hud-user">
+    <div ref={wrapper} className="hud-user" onBlur={onBlur}>
       <button
         ref={button}
         type="button"
@@ -70,11 +84,11 @@ export default function UserMenu() {
           <button type="button" className="button button--quiet" onClick={() => void signOut(true)}>
             Sign out everywhere
           </button>
-          <p className="chat__error" role="alert">
-            {error}
-          </p>
         </div>
       )}
+      <p className="hud-user__error" role="alert">
+        {error}
+      </p>
     </div>
   );
 }

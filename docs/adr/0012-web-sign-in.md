@@ -1,6 +1,6 @@
 # ADR 0012: Web sign-in with username, password and server-side sessions
 
-- Status: Accepted; implemented on feature/phase2-rest. Replaces ADR 0010 decision 1 (token paste).
+- Status: Accepted; implemented on feature/phase2-rest. Replaces ADR 0010 decision 1 (token paste). Amended by [ADR 0014](0014-hud-theme-and-globe.md): `GET /v1/sessions/current` (the caller's own username, display name and expiry, for the user menu) and the `__Host-greenloop_session_ended` marker cookie.
 - Date: 2026-10-05
 
 ## Context

@@ -38,7 +38,7 @@ export function kpiView(spec: KpiSpec, overview: Overview | null, health: Health
   if (spec.arrives) return { label: spec.label, value: "—", detail: `Arrives in Phase ${spec.arrives}` };
   const tile = overview?.tiles[spec.key];
   if (!tile || tile.value === null) {
-    return { label: spec.label, value: "—", detail: tile?.note ?? "Not loaded yet" };
+    return { label: spec.label, value: "—", detail: tile?.note ?? "No data right now" };
   }
   return { label: spec.label, value: tile.value.toLocaleString(), detail: "" };
 }
@@ -66,7 +66,7 @@ export function serviceLabel(service: Service): string {
 // Calm wording on purpose: a partial outage is "degraded" (amber), never an alarm.
 export function healthSummary(health: Health | null): HealthSummary {
   if (!health || health.total === 0) {
-    return { level: "unknown", percent: null, detail: "Checking services…", word: "System status unknown" };
+    return { level: "unknown", percent: null, detail: "No status right now", word: "System status unknown" };
   }
   const percent = Math.round((health.up / health.total) * 100);
   const detail = `${health.up} of ${health.total} services up`;

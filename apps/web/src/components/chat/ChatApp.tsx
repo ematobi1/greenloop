@@ -58,10 +58,18 @@ export default function ChatApp() {
   const [coreState, setCoreState] = useState<CoreState>("idle");
   const [deltaTick, setDeltaTick] = useState(0);
   const [reloadKey, setReloadKey] = useState(0);
+  // The finished reply, put in a persistent live region so screen readers announce it once.
+  const [announcement, setAnnouncement] = useState("");
   const abort = useRef<AbortController | null>(null);
   // Bumped when a send starts, so a history load still in flight can't overwrite the
   // messages that the stream is adding.
   const loadSeq = useRef(0);
+  // True while a reply streams: a history load that lands meanwhile (a brand-new
+  // conversation's, say) must not replace the messages the stream is adding.
+  const sending = useRef(false);
+  const list = useRef<HTMLOListElement>(null);
+  // Follow new messages only while the reader is at the bottom; scrolling up stops it.
+  const following = useRef(true);
   const draftField = useRef<HTMLTextAreaElement>(null);
 
   const signal = useCallback((event: ChatSignal) => setCoreState((current) => nextCoreState(current, event)), []);
@@ -107,7 +115,8 @@ export default function ChatApp() {
     const seq = ++loadSeq.current;
     api.listMessages(activeId).then(
       (page) => {
-        if (!current || seq !== loadSeq.current) return;
+        if (!current || seq !== loadSeq.current || sending.current) return;
+        following.current = true;
         setMessages(page.messages.map(shown));
         setHidden(page.hidden);
       },
@@ -119,6 +128,16 @@ export default function ChatApp() {
   }, [activeId, handle]);
 
   useEffect(() => () => abort.current?.abort(), []);
+
+  useEffect(() => {
+    const element = list.current;
+    if (element && following.current) element.scrollTop = element.scrollHeight;
+  }, [messages, streaming]);
+
+  function onScroll() {
+    const element = list.current;
+    if (element) following.current = element.scrollHeight - element.scrollTop - element.clientHeight < 48;
+  }
 
   function select(conversationId: string) {
     if (streaming !== null) return;
@@ -151,6 +170,9 @@ export default function ChatApp() {
     const conversationId = activeId ?? (await newConversation());
     if (!conversationId) return;
     loadSeq.current += 1;
+    sending.current = true;
+    following.current = true;
+    setAnnouncement("");
     setStreaming("");
     signal("send");
     const controller = new AbortController();
@@ -170,7 +192,10 @@ export default function ChatApp() {
             setDeltaTick((tick) => tick + 1);
             signal("delta");
           },
-          onDone: (message) => setMessages((current) => [...current, shown(message)]),
+          onDone: (message) => {
+            setMessages((current) => [...current, shown(message)]);
+            setAnnouncement(`GreenLoop replied: ${message.content}`);
+          },
           onError: (failure, partial) => {
             failed = true;
             signal("error");
@@ -185,6 +210,7 @@ export default function ChatApp() {
       signal("error");
       handle(caught);
     } finally {
+      sending.current = false;
       setStreaming(null);
       abort.current = null;
       loadConversations();
@@ -258,7 +284,7 @@ export default function ChatApp() {
               <p className="chat__empty">Showing your {conversations.length} most recent conversations.</p>
             )}
           </section>
-          <ActivityFeed conversations={conversations} reloadKey={reloadKey} onError={handle} />
+          <ActivityFeed conversations={conversations} reloadKey={reloadKey} />
         </div>
 
         <div className="hud__center hud-panel">
@@ -286,7 +312,7 @@ export default function ChatApp() {
             ) : (
               <>
                 {hidden > 0 && <p className="chat__empty">{hidden} earlier messages aren&apos;t shown.</p>}
-                <ol className="chat__messages">
+                <ol ref={list} className="chat__messages" onScroll={onScroll}>
                   {messages.map((message, index) => (
                     <li key={message.key} className={`message message--${message.role === "user" ? "user" : "assistant"}`}>
                       <span className="message__role">{message.role === "user" ? "You" : "GreenLoop"}</span>
@@ -307,9 +333,9 @@ export default function ChatApp() {
                     </li>
                   ))}
                   {streaming !== null && (
-                    <li className="message message--assistant">
+                    <li className="message message--assistant message--streaming">
                       <span className="message__role">GreenLoop</span>
-                      <p className="message__text" aria-live="polite" aria-busy="true">
+                      <p className="message__text">
                         {streaming}
                       </p>
                     </li>
@@ -318,6 +344,9 @@ export default function ChatApp() {
                 <PlanPanel key={activeId} conversationId={activeId} onError={handle} onDrafted={changed} />
               </>
             )}
+            <p className="visually-hidden" aria-live="polite" data-reply-announcement>
+              {announcement}
+            </p>
             <p className="chat__error" role="alert">
               {error}
             </p>
