@@ -43,6 +43,28 @@ test("the contrast helper matches known ratios", () => {
   assert.equal(contrast("#777777", "#ffffff").toFixed(2), "4.48");
 });
 
+test("the globe's three.js colours are the CSS tokens they name", async () => {
+  const { THEME_COLOURS } = await import("../src/lib/globe.ts");
+  for (const [name, value] of Object.entries(THEME_COLOURS)) {
+    assert.equal(`#${value.toString(16).padStart(6, "0")}`, token(name).toLowerCase(), name);
+  }
+});
+
+test("channel tokens match their hex tokens", () => {
+  const channels = (name) => new RegExp(`${name}:\\s*(\\d+) (\\d+) (\\d+);`).exec(css).slice(1).map(Number);
+  const hex = (name) => [1, 3, 5].map((i) => parseInt(token(name).slice(i, i + 2), 16));
+  assert.deepEqual(channels("--hud-accent-rgb"), hex("--hud-accent"));
+  assert.deepEqual(channels("--hud-accent-2-rgb"), hex("--hud-accent-2"));
+  assert.deepEqual(channels("--hud-core-hot-rgb"), hex("--hud-core-hot"));
+  assert.deepEqual(channels("--hud-panel-rgb"), hex("--hud-panel-solid"));
+});
+
+test("styles and the globe take colours from tokens, never raw values", () => {
+  const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
+  assert.doesNotMatch(read("../src/app/globals.css"), /rgba?\(\s*\d|#[0-9a-fA-F]{3,8}\b/);
+  assert.doesNotMatch(read("../src/components/hud/HudGlobe.tsx"), /0x[0-9a-fA-F]{6}/);
+});
+
 test("motion tokens drop to zero for reduced motion", () => {
   assert.match(css, /prefers-reduced-motion: reduce\)\s*\{\s*:root\s*\{\s*--hud-fast: 0ms;\s*--hud-slow: 0ms;/);
 });

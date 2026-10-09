@@ -18,8 +18,8 @@ body {
   min-height: 100vh;
   color: var(--hud-text);
   background:
-    radial-gradient(ellipse at 50% 35%, rgba(61, 214, 255, 0.12), transparent 60%),
-    radial-gradient(ellipse at 80% 0%, rgba(111, 139, 255, 0.1), transparent 50%),
+    radial-gradient(ellipse at 50% 35%, rgb(var(--hud-accent-rgb) / 0.12), transparent 60%),
+    radial-gradient(ellipse at 80% 0%, rgb(var(--hud-accent-2-rgb) / 0.1), transparent 50%),
     linear-gradient(180deg, var(--hud-bg) 0%, var(--hud-bg-deep) 100%);
   background-attachment: fixed;
   font-family: var(--hud-font-body);
@@ -136,7 +136,7 @@ a {
   padding: var(--hud-space-2) var(--hud-space-3);
   border: 1px solid var(--hud-border);
   border-radius: var(--hud-radius);
-  background: rgba(2, 8, 20, 0.7);
+  background: rgb(var(--hud-scrim-rgb) / 0.7);
   color: var(--hud-text);
   font: inherit;
 }
@@ -172,7 +172,7 @@ a {
   gap: var(--hud-space-3);
   padding: var(--hud-space-2) var(--hud-space-3);
   border-bottom: 1px solid var(--hud-border);
-  background: rgba(2, 6, 16, 0.85);
+  background: rgb(var(--hud-scrim-rgb) / 0.85);
   backdrop-filter: var(--hud-glass-blur);
 }
 
@@ -224,7 +224,7 @@ a {
 .hud-tabs__link[aria-current="page"] {
   border-bottom-color: var(--hud-accent);
   color: var(--hud-text);
-  text-shadow: 0 0 0.6rem rgba(61, 214, 255, 0.7);
+  text-shadow: 0 0 0.6rem rgb(var(--hud-accent-rgb) / 0.7);
 }
 
 .hud-status {
@@ -276,6 +276,15 @@ a {
   gap: var(--hud-space-2);
   min-width: 14rem;
   margin-top: var(--hud-space-2);
+}
+
+.hud-user__error {
+  color: var(--hud-error-text);
+  position: absolute;
+  top: 100%;
+  right: 0;
+  max-width: 18rem;
+  margin: 0;
 }
 
 .hud-body {
@@ -346,7 +355,7 @@ a {
   font-family: var(--hud-font-display);
   font-size: 1.5rem;
   letter-spacing: 0.06em;
-  text-shadow: 0 0 1rem rgba(61, 214, 255, 0.5);
+  text-shadow: 0 0 1rem rgb(var(--hud-accent-rgb) / 0.5);
 }
 
 .section__summary,
@@ -362,8 +371,8 @@ a {
   min-height: 100vh;
   padding: var(--hud-space-3);
   background:
-    radial-gradient(circle at 50% 45%, rgba(61, 214, 255, 0.22), transparent 35%),
-    radial-gradient(circle at 50% 45%, transparent 36%, rgba(61, 214, 255, 0.08) 37%, transparent 42%),
+    radial-gradient(circle at 50% 45%, rgb(var(--hud-accent-rgb) / 0.22), transparent 35%),
+    radial-gradient(circle at 50% 45%, transparent 36%, rgb(var(--hud-accent-rgb) / 0.08) 37%, transparent 42%),
     transparent;
 }
 
@@ -441,11 +450,11 @@ a {
   padding: var(--hud-space-2) var(--hud-space-3);
   border: 1px solid var(--hud-border);
   border-radius: var(--hud-radius);
-  background: rgba(2, 8, 20, 0.55);
+  background: rgb(var(--hud-scrim-rgb) / 0.55);
 }
 
 .message--user {
-  border-color: rgba(111, 139, 255, 0.55);
+  border-color: rgb(var(--hud-accent-2-rgb) / 0.55);
 }
 
 .message__text {
@@ -523,8 +532,8 @@ a {
   transform: translateX(-50%);
   border-radius: 50%;
   background:
-    radial-gradient(circle at 40% 35%, rgba(159, 240, 255, 0.55), transparent 35%),
-    radial-gradient(circle, rgba(61, 214, 255, 0.35), rgba(10, 22, 44, 0.2) 65%, transparent 72%);
+    radial-gradient(circle at 40% 35%, rgb(var(--hud-core-hot-rgb) / 0.55), transparent 35%),
+    radial-gradient(circle, rgb(var(--hud-accent-rgb) / 0.35), rgb(var(--hud-panel-rgb) / 0.2) 65%, transparent 72%);
   box-shadow: var(--hud-glow-strong);
 }
 
@@ -546,7 +555,7 @@ a {
   padding: var(--hud-space-1) var(--hud-space-2);
   border: 1px solid var(--hud-border);
   border-radius: var(--hud-radius);
-  background: rgba(2, 8, 20, 0.75);
+  background: rgb(var(--hud-scrim-rgb) / 0.75);
   color: var(--hud-text);
   font: inherit;
   text-align: left;
@@ -608,6 +617,14 @@ a {
   text-align: center;
 }
 
+.hud-globe__pause {
+  position: absolute;
+  top: var(--hud-space-2);
+  right: var(--hud-space-2);
+  z-index: 2;
+  font-size: var(--hud-label-size);
+}
+
 /* HUD command center */
 
 .hud {
@@ -637,7 +654,7 @@ a {
   font-weight: 700;
   line-height: 1.1;
   color: var(--hud-text);
-  text-shadow: 0 0 0.8rem rgba(61, 214, 255, 0.55);
+  text-shadow: 0 0 0.8rem rgb(var(--hud-accent-rgb) / 0.55);
 }
 
 .hud-kpi__detail,
@@ -694,7 +711,7 @@ a {
   padding: var(--hud-space-2) var(--hud-space-3);
   border: 1px solid var(--hud-border);
   border-radius: var(--hud-radius);
-  background: rgba(2, 8, 20, 0.55);
+  background: rgb(var(--hud-scrim-rgb) / 0.55);
   color: var(--hud-text);
   font: inherit;
   text-align: left;
@@ -720,7 +737,7 @@ a {
 
 .hud-health__track {
   fill: none;
-  stroke: rgba(61, 214, 255, 0.15);
+  stroke: rgb(var(--hud-accent-rgb) / 0.15);
   stroke-width: 8;
 }
 
@@ -812,7 +829,7 @@ a {
   padding: var(--hud-space-2);
   border: 1px solid var(--hud-border-strong);
   border-radius: 2rem;
-  background: rgba(4, 12, 28, 0.92);
+  background: rgb(var(--hud-scrim-rgb) / 0.92);
   box-shadow: var(--hud-glow-strong);
 }
 

@@ -85,7 +85,7 @@ test("a reply streams in piece by piece, then is stored", async ({ page }) => {
   await page.getByLabel("Message", { exact: true }).fill("hello");
   await page.getByLabel("Message", { exact: true }).press("Enter");
 
-  const live = page.locator('[aria-live="polite"]');
+  const live = page.locator(".message--streaming .message__text");
   // Deltas arrive 300 ms apart; a busy main thread may merge later ones, but the first
   // always shows on its own, before the reply is complete.
   await expect(live).toHaveText(/^Hello( from)?$/);
@@ -107,7 +107,7 @@ test("HTML in a reply is shown as text and never runs", async ({ page }) => {
   await page.getByLabel("Message", { exact: true }).fill("html please");
   await page.getByRole("button", { name: "Send" }).click();
   // Wait for the stored reply, not the streaming preview, which is always plain text.
-  await expect(page.locator('[aria-live="polite"]')).toHaveCount(0);
+  await expect(page.locator(".message--streaming")).toHaveCount(0);
   const reply = page.locator(".message--assistant .message__text");
   await expect(reply).toHaveCount(1);
   await expect(reply).toHaveText('<img src=x onerror="window.__pwned=1"><script>window.__pwned=2</script>');
@@ -136,7 +136,7 @@ test("a message can be saved to memory once", async ({ page }) => {
   await page.getByRole("button", { name: "Start a conversation" }).click();
   await page.getByLabel("Message", { exact: true }).fill("I prefer green tea");
   await page.getByLabel("Message", { exact: true }).press("Enter");
-  await expect(page.locator('[aria-live="polite"]')).toHaveCount(0);
+  await expect(page.locator(".message--streaming")).toHaveCount(0);
   const userMessage = page.locator(".message--user");
   await userMessage.getByRole("button", { name: "Remember" }).click();
   await expect(page.locator(".chat__notice")).toHaveText("Saved to memory.");

@@ -23,12 +23,14 @@ export function HudDataProvider({ children }: { children: React.ReactNode }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
 
+  // A failed refresh clears the old numbers ("—", "unknown") rather than leaving them on screen.
   const refresh = useCallback(() => {
-    const onError = (caught: unknown) => {
+    const failed = (clear: () => void) => (caught: unknown) => {
       if (caught instanceof api.ApiError && isSignedOut(caught.failure)) router.replace(api.EXPIRED_SIGN_IN);
+      else clear();
     };
-    api.overview().then(setOverview, onError);
-    api.health().then(setHealth, onError);
+    api.overview().then(setOverview, failed(() => setOverview(null)));
+    api.health().then(setHealth, failed(() => setHealth(null)));
   }, [router]);
 
   useVisiblePoll(refresh, REFRESH_MS);

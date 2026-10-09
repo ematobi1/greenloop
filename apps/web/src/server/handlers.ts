@@ -6,7 +6,7 @@ import type { ServerConfig } from "./config.ts";
 import { BODY_TOO_LARGE, readJsonBody, rejectCrossSite, rejectNonJson } from "./guard.ts";
 import { emptyResponse, errorResponse, jsonResponse } from "./http.ts";
 import { callOrchestrator, relayError, type Upstream, UpstreamFailure } from "./orchestrator.ts";
-import { clearedSessionCookie, isPlausibleToken, readSessionToken, sessionCookie, sessionEndedCookie } from "./session.ts";
+import { clearedSessionCookie, clearedSessionEndedCookie, isPlausibleToken, readSessionToken, sessionCookie, sessionEndedCookie } from "./session.ts";
 
 export type Deps = Upstream & { config: ServerConfig };
 
@@ -113,7 +113,10 @@ export async function signIn(request: Request, deps: Deps): Promise<Response> {
   if (!isPlausibleToken(session?.session_token) || !(lifetimeSeconds >= 1)) {
     return errorResponse(502, "ORCHESTRATOR_ERROR", "The GreenLoop server sent an unexpected reply.");
   }
-  return emptyResponse(204, { "Set-Cookie": sessionCookie(session.session_token, lifetimeSeconds) });
+  const headers = new Headers();
+  headers.append("Set-Cookie", sessionCookie(session.session_token, lifetimeSeconds));
+  headers.append("Set-Cookie", clearedSessionEndedCookie());
+  return emptyResponse(204, headers);
 }
 
 // Who is signed in (username for the user menu). Only these fields pass through.
@@ -494,10 +497,22 @@ export async function overview(request: Request, deps: Deps): Promise<Response> 
 const HEALTH_STATUSES = new Set(["ok", "unavailable", "not_configured"]);
 
 export async function health(request: Request, deps: Deps): Promise<Response> {
-  if (!readSessionToken(request)) return signedOut();
+  const token = readSessionToken(request);
+  if (!token) return signedOut();
+  // The probe itself is unauthenticated, so check the session first: a made-up cookie gets a 401.
+  // An unreachable orchestrator still answers below, as every service unknown.
+  let reachable = true;
+  try {
+    const session = await callOrchestrator(deps, { method: "GET", path: "/v1/sessions/current", token, signal: request.signal });
+    if (session.status === 401) return relayError(session);
+    void session.body?.cancel().catch(() => undefined);
+  } catch (error) {
+    if (!(error instanceof UpstreamFailure)) throw error;
+    reachable = false;
+  }
   let checks: Record<string, unknown> = {};
   let orchestrator = "unavailable";
-  try {
+  if (reachable) try {
     const response = await callOrchestrator(deps, { method: "GET", path: "/v1/health", token: null, signal: request.signal, timeoutMs: 5000 });
     if (response.status === 200 || response.status === 503) {
       orchestrator = "ok";
@@ -515,10 +530,13 @@ export async function health(request: Request, deps: Deps): Promise<Response> {
     { name: "broker", status: status(checks.broker) },
     { name: "database", status: status(checks.database) },
   ];
+  // A service that isn't configured is not an outage (the orchestrator stays ready), so it
+  // counts neither up nor down: a local run without a broker reads "2 of 2 services up".
+  const counted = services.filter((service) => service.status !== "not_configured");
   return jsonResponse({
     services,
-    up: services.filter((service) => service.status === "ok").length,
-    total: services.length,
+    up: counted.filter((service) => service.status === "ok").length,
+    total: counted.length,
     updated_at: new Date().toISOString(),
   });
 }

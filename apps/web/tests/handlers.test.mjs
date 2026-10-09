@@ -83,6 +83,10 @@ test("sign-in trades username and password for a session cookie and returns no b
   assert.ok(cookie.startsWith(`${SESSION_COOKIE}=${TOKEN};`));
   const maxAge = Number(/Max-Age=(\d+)/.exec(cookie)[1]);
   assert.ok(maxAge > 3500 && maxAge <= 3600, `Max-Age ${maxAge} follows the session's expiry`);
+  assert.ok(
+    response.headers.getSetCookie().some((value) => value.startsWith("__Host-greenloop_session_ended=;") && value.includes("Max-Age=0")),
+    "a fresh sign-in clears any session-ended marker",
+  );
   assert.equal(calls[0].url, "http://orchestrator:8000/v1/sessions");
   assert.equal(calls[0].init.method, "POST");
   assert.deepEqual(JSON.parse(calls[0].init.body), CREDENTIALS);
@@ -608,8 +612,10 @@ test("an expired session on any source signs the user out", async () => {
 });
 
 test("health reports statuses only and never the orchestrator's address", async () => {
-  const { calls, deps } = routed(() =>
-    Response.json({ status: "degraded", checks: { database: "ok", broker: "unavailable", extra: "http://broker:8100" } }, { status: 503 }),
+  const { calls, deps } = routed((url) =>
+    url.pathname === "/v1/sessions/current"
+      ? Response.json({ username: "alice" })
+      : Response.json({ status: "degraded", checks: { database: "ok", broker: "unavailable", extra: "http://broker:8100" } }, { status: 503 }),
   );
   const response = await health(request("/api/health"), deps);
   const text = await response.clone().text();
@@ -619,7 +625,18 @@ test("health reports statuses only and never the orchestrator's address", async 
     { name: "database", status: "ok" },
   ]);
   assert.ok(!text.includes("orchestrator:8000") && !text.includes("broker:8100"));
-  assert.equal(calls[0].init.headers.Authorization, undefined);
+  const probe = calls.find((call) => new URL(call.url).pathname === "/v1/health");
+  assert.equal(probe.init.headers.Authorization, undefined);
+});
+
+test("health checks the session before probing, so a made-up cookie learns nothing", async () => {
+  const { calls, deps } = routed((url) =>
+    url.pathname === "/v1/sessions/current" ? apiError(401, "UNAUTHENTICATED") : Response.json({ checks: { database: "ok" } }),
+  );
+  const response = await health(request("/api/health"), deps);
+  assert.equal(response.status, 401);
+  assert.ok(response.headers.get("set-cookie").includes("Max-Age=0"));
+  assert.ok(!calls.some((call) => new URL(call.url).pathname === "/v1/health"));
 });
 
 test("an unreachable orchestrator makes everything behind it unknown", async () => {
@@ -630,6 +647,17 @@ test("an unreachable orchestrator makes everything behind it unknown", async () 
     ["unavailable", "unknown", "unknown"],
   );
   assert.equal(body.up, 0);
+});
+
+test("a broker that isn't configured counts neither up nor down", async () => {
+  const { deps } = routed((url) =>
+    url.pathname === "/v1/sessions/current"
+      ? Response.json({ username: "alice" })
+      : Response.json({ checks: { database: "ok", broker: "not_configured" } }),
+  );
+  const body = await (await health(request("/api/health"), deps)).json();
+  assert.equal(body.up, 2);
+  assert.equal(body.total, 2);
 });
 
 test("health and overview need a session", async () => {
